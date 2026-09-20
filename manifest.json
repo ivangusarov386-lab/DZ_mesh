@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "МЭШ — автозадание ДЗ по дню",
+  "version": "1.0",
+  "description": "Выбираете день текущей недели — расширение создаёт домашнее задание \"Не задано.\" для уроков этого дня, у которых его ещё нет.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://school.mos.ru/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "МЭШ — автозадание ДЗ"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://school.mos.ru/*"],
+      "js": ["inject.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://school.mos.ru/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

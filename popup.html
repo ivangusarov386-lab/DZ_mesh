@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>МЭШ — автозадание ДЗ</title>
+<style>
+  body {
+    width: 340px;
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    padding: 12px;
+    color: #222;
+  }
+  h1 {
+    font-size: 15px;
+    margin: 0 0 10px;
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  .primary {
+    background: #5b3df5;
+    color: #fff;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+  .primary:disabled {
+    background: #c9c3f7;
+    cursor: default;
+  }
+  #days {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .day-btn {
+    background: #eee;
+    flex: 1 0 30%;
+  }
+  .day-btn.selected {
+    background: #5b3df5;
+    color: #fff;
+  }
+  #lessons {
+    max-height: 260px;
+    overflow-y: auto;
+    font-size: 12px;
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+  }
+  .lesson-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid #f2f2f2;
+  }
+  .status-ok { color: #2e7d32; }
+  .status-missing { color: #c62828; font-weight: 600; }
+  #status {
+    font-size: 12px;
+    color: #666;
+    margin-top: 8px;
+    white-space: pre-line;
+  }
+  #runBtn {
+    background: #2e7d32;
+    color: #fff;
+    width: 100%;
+    margin-top: 8px;
+  }
+  #runBtn:disabled {
+    background: #a5d6a7;
+  }
+</style>
+</head>
+<body>
+  <h1>МЭШ — автозадание ДЗ</h1>
+  <button id="loadBtn" class="primary">Загрузить текущую неделю</button>
+  <div id="days"></div>
+  <div id="lessons"></div>
+  <button id="runBtn" style="display:none;">Создать «Не задано.» для отмеченных</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
