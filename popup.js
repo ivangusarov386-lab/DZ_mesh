@@ -1,10 +1,14 @@
 const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
-let lessons = [];          // все уроки недели (из schedule_items)
+let lessons = [];          // все уроки недели (из schedule_items) — только
+                            // те, где в расписании ДВЕ кнопки: «К журналу»
+                            // и «К уроку» (см. правило в inject.js)
 let presence = {};         // id урока -> есть ли уже дз (true/false)
 let selectedDate = null;   // [Y,M,D]
 let activeTabId = null;
 let pollTimer = null;
+let ecCount = 0;            // замечено записей "внеурочная" (ВН) — пропущено
+let aeCount = 0;            // замечено записей "доп. образование" — пропущено
 
 const daysEl = document.getElementById("days");
 const lessonsEl = document.getElementById("lessons");
@@ -42,6 +46,8 @@ async function getActiveTab() {
 loadBtn.addEventListener("click", async () => {
   lessons = [];
   presence = {};
+  ecCount = 0;
+  aeCount = 0;
   selectedDate = null;
   daysEl.innerHTML = "";
   lessonsEl.innerHTML = "";
@@ -59,16 +65,42 @@ loadBtn.addEventListener("click", async () => {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "schedule_items") {
-    lessons = msg.data || [];
+    // Защитная проверка (дублирует фильтр в inject.js «на всякий случай»):
+    // это должны быть обычные уроки с обеими кнопками «К журналу» и
+    // «К уроку» — у таких записей всегда есть group_id и class_unit_id.
+    // Если у записи их нет, это не урок в привычном смысле — не берём её
+    // в очередь на создание ДЗ.
+    lessons = (msg.data || []).filter((l) => l && l.id != null && l.group_id != null && l.class_unit_id != null);
     renderDays();
-    log(`Загружено уроков за неделю: ${lessons.length}. Выберите день.`, true);
+    updateSummary();
   } else if (msg.type === "homework_presence") {
     for (const row of msg.data || []) {
       presence[row.lesson_schedule_item_id] = row.is_homework_exist;
     }
     if (selectedDate) renderLessons();
+  } else if (msg.type === "ec_schedule_items") {
+    // Внеурочная деятельность («ВН») — только «К журналу», без «К уроку».
+    // В очередь на ДЗ не идёт, только считаем для честного отчёта.
+    ecCount = (msg.data || []).length;
+    updateSummary();
+  } else if (msg.type === "ae_schedule_items") {
+    // Доп. образование / секции («доп») — своя система, без ДЗ в журнале.
+    // В очередь на ДЗ не идёт, только считаем для честного отчёта.
+    aeCount = (msg.data || []).length;
+    updateSummary();
   }
 });
+
+function updateSummary() {
+  let text = `Загружено уроков за неделю: ${lessons.length} (с кнопками «К журналу» + «К уроку»). Выберите день.`;
+  const skipped = [];
+  if (ecCount > 0) skipped.push(`внеурочная — ${ecCount}`);
+  if (aeCount > 0) skipped.push(`доп. образование — ${aeCount}`);
+  if (skipped.length) {
+    text += `\nЗамечено и пропущено (без ДЗ в журнале): ${skipped.join(", ")}.`;
+  }
+  log(text, true);
+}
 
 function dateKey(d) {
   return d.join("-");
