@@ -52,7 +52,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, reason: "no-create-button" });
         return;
       }
-      await sleep(1200);
+      // МЭШ открывает промежуточные окна не мгновенно — каталог материалов,
+      // в частности, подгружает библиотеку из нескольких тысяч карточек, и
+      // на медленном соединении/первой отрисовке это может занять несколько
+      // секунд. Раньше здесь стояли слишком короткие таймауты, из-за которых
+      // скрипт "сдавался" (no-textarea), хотя форма на самом деле открывалась
+      // чуть позже — просто скрипт этого уже не дожидался. Здесь и ниже все
+      // таймауты сделаны заметно шире с запасом; это не замедляет успешный
+      // прогон (waitFor завершается сразу, как только условие выполнилось),
+      // а только даёт больше времени, когда МЭШ отвечает медленнее обычного.
+      await sleep(1800);
 
       // У части уроков перед формой описания всплывает промежуточное окно
       // "Добавить материалы из урока КТП?" (когда к уроку уже привязан
@@ -60,7 +69,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // с кнопкой "Открыть описание". Обрабатываем оба варианта.
       const gotKtpDialog = await waitFor(
         () => document.body.innerText.includes("Добавить материалы из урока КТП"),
-        1500
+        3000
       );
       if (gotKtpDialog) {
         const attached = await clickByText("Прикрепить", true);
@@ -68,15 +77,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: false, reason: "ktp-dialog-stuck" });
           return;
         }
-        await sleep(900);
+        await sleep(1200);
       } else {
         const gotCatalog = await waitFor(
           () => document.body.innerText.includes("Открыть описание"),
-          2500
+          6000
         );
         if (gotCatalog) {
           await clickByText("Открыть описание");
-          await sleep(700);
+          await sleep(1200);
         }
         // если ни диалог КТП, ни каталог не появились — форма описания,
         // возможно, уже открылась сама; проверяем ниже по наличию textarea
@@ -84,7 +93,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       const textarea = await waitForEl(
         () => document.querySelector('textarea[placeholder="Введите значение..."]'),
-        4000
+        8000
       );
       if (!textarea) {
         sendResponse({ ok: false, reason: "no-textarea" });
@@ -96,21 +105,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       ).set;
       setter.call(textarea, text);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
-      await sleep(400);
+      await sleep(500);
 
       const step2 = await clickByText("Выдать задание", true);
       if (!step2) {
         sendResponse({ ok: false, reason: "no-submit-button" });
         return;
       }
-      await sleep(700);
+      await sleep(1000);
 
       const confirmed = await clickByText("Выдать домашнее задание", true);
       if (!confirmed) {
         sendResponse({ ok: false, reason: "no-confirm-button" });
         return;
       }
-      await sleep(1800);
+      await sleep(2200);
 
       // Финальная проверка: действительно ли задание появилось, а не просто
       // "тихо" ничего не произошло.
@@ -118,7 +127,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         () =>
           document.body.innerText.includes("Домашнее задание создано") ||
           document.body.innerText.includes("Задание №1"),
-        4000
+        6000
       );
 
       sendResponse({ ok: true, created: true, verified });
