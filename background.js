@@ -94,7 +94,11 @@ async function runLoop() {
 
 async function tryCreateHomework(lesson) {
   await openLessonAndWaitLoad(lesson.id);
-  await sleep(1000);
+  // Страница МЭШ — тяжёлое React-приложение: событие "загрузка вкладки
+  // завершена" срабатывает раньше, чем панель "Домашнее задание" реально
+  // дорисовывается. Небольшой запас здесь снижает шанс того, что дальнейшие
+  // клики в content.js попадут по ещё не отрисованному интерфейсу.
+  await sleep(1500);
 
   const resp = await sendToTab(state.tabId, { type: "check-and-create", text: "Не задано." }).catch(
     () => ({ ok: false, reason: "message-failed" })
@@ -138,7 +142,7 @@ function openLessonAndWaitLoad(lessonId) {
     setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
       resolve();
-    }, 6000);
+    }, 9000);
   });
 }
 
