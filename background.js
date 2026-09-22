@@ -77,6 +77,11 @@ async function runLoop() {
         pushLog(`— ${lesson.group_name}: уже было задано`);
       } else {
         pushLog(`✗ ${lesson.group_name}: НЕ УДАЛОСЬ (${outcome.reason}) — сделайте вручную`);
+        // Снимок видимых кнопок на момент сбоя — полезно для диагностики
+        // без необходимости открывать консоль разработчика вручную.
+        if (outcome.debug) {
+          pushLog(`   кнопки на экране: ${outcome.debug}`);
+        }
         state.failed.push(lesson.group_name);
       }
     }
@@ -113,7 +118,11 @@ async function tryCreateHomework(lesson) {
   if (resp && resp.ok && !resp.created) {
     return { status: "exists" };
   }
-  return { status: "error", reason: resp ? resp.reason : "нет ответа от страницы" };
+  return {
+    status: "error",
+    reason: resp ? resp.reason : "нет ответа от страницы",
+    debug: resp ? resp.debug : undefined,
+  };
 }
 
 function sendToTab(tabId, message) {
