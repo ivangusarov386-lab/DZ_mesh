@@ -52,51 +52,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, reason: "no-create-button" });
         return;
       }
-      // МЭШ открывает промежуточные окна не мгновенно — каталог материалов,
-      // в частности, подгружает библиотеку из нескольких тысяч карточек, и
-      // на медленном соединении/первой отрисовке это может занять несколько
-      // секунд. Раньше здесь стояли слишком короткие таймауты, из-за которых
-      // скрипт "сдавался" (no-textarea), хотя форма на самом деле открывалась
-      // чуть позже — просто скрипт этого уже не дожидался. Здесь и ниже все
-      // таймауты сделаны заметно шире с запасом; это не замедляет успешный
-      // прогон (waitFor завершается сразу, как только условие выполнилось),
-      // а только даёт больше времени, когда МЭШ отвечает медленнее обычного.
-      await sleep(1800);
 
-      // У части уроков перед формой описания всплывает промежуточное окно
-      // "Добавить материалы из урока КТП?" (когда к уроку уже привязан
-      // материал по КТП). У остальных сразу открывается каталог материалов
-      // с кнопкой "Открыть описание". Обрабатываем оба варианта.
-      const gotKtpDialog = await waitFor(
-        () => document.body.innerText.includes("Добавить материалы из урока КТП"),
-        3000
-      );
-      if (gotKtpDialog) {
-        const attached = await clickByText("Прикрепить", true);
-        if (!attached) {
-          sendResponse({ ok: false, reason: "ktp-dialog-stuck" });
-          return;
-        }
-        await sleep(1200);
-      } else {
-        const gotCatalog = await waitFor(
-          () => document.body.innerText.includes("Открыть описание"),
-          6000
-        );
-        if (gotCatalog) {
-          await clickByText("Открыть описание");
-          await sleep(1200);
-        }
-        // если ни диалог КТП, ни каталог не появились — форма описания,
-        // возможно, уже открылась сама; проверяем ниже по наличию textarea
-      }
-
-      const textarea = await waitForEl(
-        () => document.querySelector('textarea[placeholder="Введите значение..."]'),
-        8000
-      );
+      // После клика МЭШ показывает один из НЕСКОЛЬКИХ промежуточных экранов
+      // перед формой с полем "Описание задания" — единого стабильного
+      // сценария тут нет, встречались как минимум такие варианты:
+      //  - окно "Добавить материалы из урока КТП?" с кнопкой "Прикрепить";
+      //  - каталог материалов библиотеки с кнопкой "Открыть описание"
+      //    (если ничего не выбрано) ИЛИ с кнопкой "Прикрепить" (если в
+      //    каталоге что-то уже оказалось выбрано/подсвечено — этот
+      //    вариант раньше не обрабатывался и был похож на зависание);
+      //  - форма открывается сразу, без промежуточных экранов.
+      // Вместо жёсткой последовательности шагов — цикл: на каждой итерации
+      // смотрим, что сейчас на экране, и кликаем по первой подходящей
+      // кнопке, пока не появится само поле ввода или не кончится общий
+      // лимит времени. Это устойчивее к тому, какой именно экран попадётся.
+      const textarea = await advanceToDescriptionForm();
       if (!textarea) {
-        sendResponse({ ok: false, reason: "no-textarea" });
+        sendResponse({ ok: false, reason: "no-textarea", debug: visibleButtonTexts() });
         return;
       }
       const setter = Object.getOwnPropertyDescriptor(
@@ -170,6 +142,60 @@ function waitForEl(getter, timeout = 8000, interval = 200) {
       }
     }, interval);
   });
+}
+
+// Проходит через промежуточные экраны МЭШ (диалог КТП, каталог материалов
+// в любом из его состояний) и возвращает найденный textarea, либо null,
+// если за отведённое время форма так и не появилась. На каждой итерации
+// заново смотрит на текущее состояние страницы — если промежуточный экран
+// пропущен или порядок иной, чем обычно, это не ломает цикл.
+async function advanceToDescriptionForm(totalTimeout = 20000, interval = 400) {
+  const deadline = Date.now() + totalTimeout;
+  while (Date.now() < deadline) {
+    const existing = document.querySelector('textarea[placeholder="Введите значение..."]');
+    if (existing) return existing;
+
+    if (document.body.innerText.includes("Добавить материалы из урока КТП")) {
+      const clicked = await clickByText("Прикрепить", true);
+      if (clicked) {
+        await sleep(1000);
+        continue;
+      }
+    }
+
+    if (document.body.innerText.includes("Открыть описание")) {
+      const clicked = await clickByText("Открыть описание");
+      if (clicked) {
+        await sleep(1000);
+        continue;
+      }
+    }
+
+    // Мы в каталоге материалов, но кнопки "Открыть описание" нет — скорее
+    // всего что-то в каталоге уже выбрано/подсвечено, и кнопка сейчас
+    // называется "Прикрепить" (без промежуточного окна КТП). Пробуем и
+    // этот вариант, раз мы точно внутри экрана каталога.
+    if (document.body.innerText.includes("Прикрепление материалов к домашнему заданию")) {
+      const clicked = await clickByText("Прикрепить", true);
+      if (clicked) {
+        await sleep(1000);
+        continue;
+      }
+    }
+
+    await sleep(interval);
+  }
+  return document.querySelector('textarea[placeholder="Введите значение..."]');
+}
+
+// Короткий снимок подписей видимых кнопок — попадает в лог попапа при
+// ошибке "no-textarea", чтобы не гадать вслепую, какой именно экран
+// оказался на странице в момент сбоя.
+function visibleButtonTexts(max = 10) {
+  const texts = Array.from(document.querySelectorAll("button"))
+    .map((b) => b.textContent.trim())
+    .filter((t) => t && t.length > 0 && t.length <= 40);
+  return texts.slice(0, max).join(" | ");
 }
 
 function clickByText(text, exact = false) {
