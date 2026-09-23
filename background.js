@@ -93,7 +93,8 @@ async function runLoop() {
       }
     }
 
-    await sleep(800);
+    // Пауза между уроками — как у человека, который переходит к следующему.
+    await sleep(1500 + Math.random() * 1500);
   }
 
   state.running = false;
