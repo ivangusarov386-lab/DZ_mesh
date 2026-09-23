@@ -3,7 +3,14 @@ const WEEKDAYS = ["Воскресенье", "Понедельник", "Втор�
 let lessons = [];          // все уроки недели (из schedule_items) — только
                             // те, где в расписании ДВЕ кнопки: «К журналу»
                             // и «К уроку» (см. правило в inject.js)
-let presence = {};         // id урока -> есть ли уже дз (true/false)
+// ВАЖНО: зелёный «домик» в расписании (эндпоинт homework_presence) означает,
+// что на этот урок НУЖНО СДАТЬ ранее заданное ДЗ, а не то, что ДЗ выдано
+// НА этом уроке. Поэтому по нему нельзя решать, у каких уроков «нет ДЗ» —
+// раньше из-за этого уроки без выданного ДЗ ошибочно считались «задано» и
+// пропускались. Теперь проверяются ВСЕ уроки дня: расширение открывает
+// каждый урок и смотрит на саму страницу («Домашнее задание отсутствует»
+// или уже есть задание). Итог по каждому уроку хранится здесь.
+let results = {};          // id урока -> "created" | "exists" | "failed"
 let selectedDate = null;   // [Y,M,D]
 let activeTabId = null;
 let pollTimer = null;
@@ -45,7 +52,7 @@ async function getActiveTab() {
 
 loadBtn.addEventListener("click", async () => {
   lessons = [];
-  presence = {};
+  results = {};
   ecCount = 0;
   aeCount = 0;
   selectedDate = null;
@@ -73,11 +80,6 @@ chrome.runtime.onMessage.addListener((msg) => {
     lessons = (msg.data || []).filter((l) => l && l.id != null && l.group_id != null && l.class_unit_id != null);
     renderDays();
     updateSummary();
-  } else if (msg.type === "homework_presence") {
-    for (const row of msg.data || []) {
-      presence[row.lesson_schedule_item_id] = row.is_homework_exist;
-    }
-    if (selectedDate) renderLessons();
   } else if (msg.type === "ec_schedule_items") {
     // Внеурочная деятельность («ВН») — только «К журналу», без «К уроку».
     // В очередь на ДЗ не идёт, только считаем для честного отчёта.
@@ -137,40 +139,49 @@ function renderDays() {
   }
 }
 
-function renderLessons() {
-  const dayLessons = lessons
+const RESULT_LABELS = {
+  created: ["создано", "status-ok"],
+  exists: ["уже было", "status-ok"],
+  failed: ["ошибка", "status-missing"],
+};
+
+function dayLessons() {
+  return lessons
     .filter((l) => dateKey(l.date) === dateKey(selectedDate))
     .sort((a, b) => (a.time[0] * 60 + a.time[1]) - (b.time[0] * 60 + b.time[1]));
+}
 
+// Уроки, которые ещё надо проверить: всё, кроме уже проверенных успешно.
+function pendingLessons() {
+  return dayLessons().filter((l) => results[l.id] !== "created" && results[l.id] !== "exists");
+}
+
+function renderLessons() {
   lessonsEl.innerHTML = "";
-  let missingCount = 0;
-
-  for (const l of dayLessons) {
-    const hasHw = presence[l.id];
+  for (const l of dayLessons()) {
     const row = document.createElement("div");
     row.className = "lesson-row";
     const time = `${String(l.time[0]).padStart(2, "0")}:${String(l.time[1]).padStart(2, "0")}`;
     const label = document.createElement("span");
     label.textContent = `${time} ${l.group_name}`;
     const status = document.createElement("span");
-    if (hasHw === true) {
-      status.textContent = "задано";
-      status.className = "status-ok";
-    } else if (hasHw === false) {
-      status.textContent = "нет ДЗ";
-      status.className = "status-missing";
-      missingCount++;
+    const r = RESULT_LABELS[results[l.id]];
+    if (r) {
+      status.textContent = r[0];
+      status.className = r[1];
     } else {
-      status.textContent = "?";
+      status.textContent = "проверю";
+      status.className = "status-unknown";
     }
     row.appendChild(label);
     row.appendChild(status);
     lessonsEl.appendChild(row);
   }
 
-  if (missingCount > 0) {
+  const pending = pendingLessons().length;
+  if (pending > 0) {
     runBtn.style.display = "block";
-    runBtn.textContent = `Создать «Не задано.» (${missingCount} урок(ов))`;
+    runBtn.textContent = `Проверить и поставить «Не задано.» (${pending} урок(ов))`;
     runBtn.disabled = false;
   } else {
     runBtn.style.display = "none";
@@ -178,9 +189,7 @@ function renderLessons() {
 }
 
 runBtn.addEventListener("click", async () => {
-  const todo = lessons.filter(
-    (l) => dateKey(l.date) === dateKey(selectedDate) && presence[l.id] === false
-  );
+  const todo = pendingLessons();
   if (todo.length === 0) return;
 
   runBtn.disabled = true;
@@ -208,10 +217,6 @@ function startPolling() {
     if (!status.running) {
       clearInterval(pollTimer);
       pollTimer = null;
-      // обновляем статусы уроков дня по факту завершения
-      for (const l of status.todo) {
-        if (!status.failed.includes(l.group_name)) presence[l.id] = true;
-      }
       if (selectedDate) renderLessons();
       runBtn.disabled = false;
     }
@@ -219,6 +224,8 @@ function startPolling() {
 }
 
 function renderFromStatus(status) {
+  Object.assign(results, status.results || {});
+  if (selectedDate) renderLessons();
   log((status.log || []).join("\n"), true);
   runBtn.disabled = !!status.running;
 }

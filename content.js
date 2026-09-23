@@ -99,7 +99,13 @@ async function createHomework(text) {
   );
   if (!panel) return fail("timeout", "панель «Домашнее задание» не загрузилась");
   if (!hasText("Домашнее задание отсутствует")) {
-    return { ok: true, created: false, reason: "already-exists" };
+    // Теперь проверяются ВСЕ уроки дня, поэтому решение «ДЗ уже есть»
+    // важно не принять поспешно: даём панели ещё немного дорисоваться.
+    await sleep(1500);
+    if (!hasText("Домашнее задание отсутствует")) {
+      step("ДЗ на этом уроке уже выдано");
+      return { ok: true, created: false, reason: "already-exists" };
+    }
   }
 
   // 2. Идём по экранам, пока не появится поле описания.
@@ -541,4 +547,3 @@ function waitForEl(getter, timeout = 8000, interval = 200) {
     tick();
   });
 }
-

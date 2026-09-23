@@ -12,6 +12,7 @@ let state = {
   idx: 0,
   total: 0,
   failed: [],     // имена классов, которые не удалось обработать
+  results: {},    // id урока -> "created" | "exists" | "failed"
   log: [],        // текстовые строки для отображения в popup
 };
 
@@ -33,6 +34,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       idx: 0,
       total: (msg.todo || []).length,
       failed: [],
+      results: {},
       log: [],
     };
     pushLog(`Запуск: уроков в очереди — ${state.total}.`);
@@ -64,6 +66,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function runLoop() {
+  let created = 0;
+  let existed = 0;
   for (state.idx = 0; state.idx < state.todo.length; state.idx++) {
     if (!state.running) break; // отменили
 
@@ -71,37 +75,37 @@ async function runLoop() {
     pushLog(`(${state.idx + 1}/${state.total}) Открываю урок: ${lesson.group_name}...`);
 
     let outcome = await tryCreateHomework(lesson);
-    if (outcome.status === "created") {
-      pushLog(`✓ ${lesson.group_name}: задание создано`);
-    } else if (outcome.status === "exists") {
-      pushLog(`— ${lesson.group_name}: уже было задано`);
-    } else {
+    let second = false;
+    if (outcome.status === "error") {
       pushLog(`⚠ ${lesson.group_name}: не удалось (${outcome.reason}), пробую ещё раз...`);
       outcome = await tryCreateHomework(lesson);
-      if (outcome.status === "created") {
-        pushLog(`✓ ${lesson.group_name}: задание создано (со второй попытки)`);
-      } else if (outcome.status === "exists") {
-        pushLog(`— ${lesson.group_name}: уже было задано`);
-      } else {
-        pushLog(`✗ ${lesson.group_name}: НЕ УДАЛОСЬ (${outcome.reason}) — сделайте вручную`);
-        // Снимок видимых кнопок на момент сбоя — полезно для диагностики
-        // без необходимости открывать консоль разработчика вручную.
-        if (outcome.debug) {
-          pushLog(`   ${outcome.debug}`);
-        }
-        state.failed.push(lesson.group_name);
-      }
+      second = true;
+    }
+
+    if (outcome.status === "created") {
+      created++;
+      state.results[lesson.id] = "created";
+      pushLog(`✓ ${lesson.group_name}: задание создано${second ? " (со второй попытки)" : ""}`);
+    } else if (outcome.status === "exists") {
+      existed++;
+      state.results[lesson.id] = "exists";
+      pushLog(`— ${lesson.group_name}: ДЗ на этом уроке уже выдано, пропускаю`);
+    } else {
+      state.results[lesson.id] = "failed";
+      pushLog(`✗ ${lesson.group_name}: НЕ УДАЛОСЬ (${outcome.reason}) — сделайте вручную`);
+      // Снимок экрана (кнопки, открытое окно) на момент сбоя.
+      if (outcome.debug) pushLog(`   ${outcome.debug}`);
+      state.failed.push(lesson.group_name);
     }
 
     // Пауза между уроками — как у человека, который переходит к следующему.
-    await sleep(1500 + Math.random() * 1500);
+    if (state.idx < state.todo.length - 1) await sleep(1500 + Math.random() * 1500);
   }
 
   state.running = false;
+  pushLog(`Готово. Создано: ${created}, уже было: ${existed}.`);
   if (state.failed.length > 0) {
-    pushLog(`Готово. НЕ создано (нужно вручную): ${state.failed.join(", ")}`);
-  } else {
-    pushLog(`Готово. Все задания обработаны и проверены.`);
+    pushLog(`НЕ создано (нужно вручную): ${state.failed.join(", ")}`);
   }
 }
 
