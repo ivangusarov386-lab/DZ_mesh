@@ -17,7 +17,7 @@ let state = {
 
 function pushLog(line) {
   state.log.push(line);
-  if (state.log.length > 200) state.log.shift();
+  if (state.log.length > 400) state.log.shift();
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -39,6 +39,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     runLoop(); // не ждём — работает в фоне
     sendResponse({ ok: true });
     return true;
+  }
+
+  // Пошаговый отчёт из content.js: что именно нажато на странице урока.
+  // Показываем в логе попапа с отступом под строкой урока.
+  if (msg.type === "hw-step") {
+    if (state.running) pushLog(`   · ${msg.text}`);
+    return false;
   }
 
   if (msg.type === "get-status") {
@@ -80,7 +87,7 @@ async function runLoop() {
         // Снимок видимых кнопок на момент сбоя — полезно для диагностики
         // без необходимости открывать консоль разработчика вручную.
         if (outcome.debug) {
-          pushLog(`   кнопки на экране: ${outcome.debug}`);
+          pushLog(`   ${outcome.debug}`);
         }
         state.failed.push(lesson.group_name);
       }
