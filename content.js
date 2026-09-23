@@ -63,6 +63,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Основной сценарий
 // ---------------------------------------------------------------------------
 
+// ---- Режим «как человек» ------------------------------------------------
+// HUMAN_MODE = true  — нарисованный курсор плавно ездит к кнопкам, перед
+//                      каждым нажатием пауза «прочитать экран», текст
+//                      печатается по буквам. Урок занимает ~15–20 секунд.
+// HUMAN_MODE = false — быстрый режим без курсора (~2 секунды на урок).
+// SPEED — множитель всех «человеческих» пауз: 1.5 = медленнее, 0.7 = быстрее.
+const HUMAN_MODE = true;
+const SPEED = 1;
+
 const CREATE_BTN = "Создать домашнее задание";
 const SUBMIT_BTN = "Выдать задание";
 const CONFIRM_BTN = "Выдать домашнее задание";
@@ -76,6 +85,7 @@ function step(text) {
 
 function fail(reason, extra) {
   if (extra) step(extra);
+  hideCursorLater();
   return { ok: false, reason, debug: snapshot() };
 }
 
@@ -96,13 +106,12 @@ async function createHomework(text) {
   const field = await reachDescriptionField();
   if (!field.ok) return field.result;
 
-  // 3. Вписываем текст.
+  // 3. Вписываем текст: подводим курсор к полю, кликаем, печатаем.
   const ta = field.el;
+  await think();
+  await humanClick(ta);
   ta.focus();
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-  setter.call(ta, text);
-  ta.dispatchEvent(new Event("input", { bubbles: true }));
-  ta.dispatchEvent(new Event("change", { bubbles: true }));
+  await typeText(ta, text);
   await sleep(400);
   if (ta.value !== text) return fail("text-not-set", "текст в поле описания не вписался");
   step(`вписал «${text}»`);
@@ -110,8 +119,9 @@ async function createHomework(text) {
   // 4. «Выдать задание» — ждём, пока кнопка станет активной.
   const submit = await waitForEl(() => findClickable(SUBMIT_BTN), 6000);
   if (!submit) return fail("no-submit-button", `нет активной кнопки «${SUBMIT_BTN}»`);
+  await think(500, 1100);
   step(`нажимаю «${SUBMIT_BTN}»`);
-  realClick(submit);
+  await humanClick(submit);
 
   // 5. Окно подтверждения бывает не всегда — ждём либо его, либо успех.
   const next = await waitForEl(
@@ -120,13 +130,15 @@ async function createHomework(text) {
   );
   if (!next) return fail("no-confirm-button", `после «${SUBMIT_BTN}» ничего не произошло`);
   if (next !== "success") {
+    await think(600, 1300);
     step(`нажимаю «${CONFIRM_BTN}»`);
-    realClick(next);
+    await humanClick(next);
   }
 
   // 6. Проверяем, что задание действительно появилось.
   const verified = await waitFor(isSuccess, 8000);
   step(verified ? "задание видно на странице" : "задание не подтвердилось на странице");
+  hideCursorLater();
   return { ok: true, created: true, verified, debug: verified ? undefined : snapshot() };
 }
 
@@ -173,9 +185,15 @@ async function reachDescriptionField(totalTimeout = 40000) {
       };
     }
 
+    // «Прочитать» экран перед нажатием, как это делает человек. После паузы
+    // ищем кнопку заново — за это время страница могла перерисоваться.
+    await think();
+    const fresh = pickAction();
+    if (!fresh || fresh.key !== action.key) continue;
+
     step(repeats ? `повторно нажимаю «${action.label}»` : `нажимаю «${action.label}»`);
     const before = screenSignature();
-    realClick(action.el);
+    await humanClick(fresh.el);
     // Ждём, пока экран реально поменяется (или появится поле описания).
     await waitFor(() => findDescriptionField() || screenSignature() !== before, 5000, 150);
     await sleep(500); // даём анимации модалки закончиться
@@ -266,14 +284,14 @@ function isOnTop(el) {
   return hit === el || el.contains(hit) || hit.contains(el);
 }
 
-function realClick(el) {
+function realClick(el, point) {
   const r = el.getBoundingClientRect();
   const base = {
     bubbles: true,
     cancelable: true,
     composed: true,
-    clientX: r.left + r.width / 2,
-    clientY: r.top + r.height / 2,
+    clientX: point ? point.x : r.left + r.width / 2,
+    clientY: point ? point.y : r.top + r.height / 2,
     button: 0,
   };
   el.dispatchEvent(new PointerEvent("pointerdown", { ...base, pointerType: "mouse", isPrimary: true }));
@@ -295,6 +313,162 @@ function isVisible(el) {
   if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
   const cs = getComputedStyle(el);
   return cs.visibility !== "hidden" && cs.display !== "none" && parseFloat(cs.opacity || "1") > 0.05;
+}
+
+// ---------------------------------------------------------------------------
+// «Человеческий» режим: курсор, паузы, печать по буквам
+// ---------------------------------------------------------------------------
+// Настоящий системный курсор расширение двигать не может (это запрещено
+// браузером), поэтому рисуем свой — картинку стрелки поверх страницы. Она
+// не перехватывает клики (pointer-events: none) и никак не мешает сайту.
+
+function rand(a, b) {
+  return a + Math.random() * (b - a);
+}
+
+function think(min = 700, max = 1500) {
+  return HUMAN_MODE ? sleep(rand(min, max) * SPEED) : Promise.resolve();
+}
+
+let cursorEl = null;
+let cursorPos = null;
+let hideTimer = null;
+
+function ensureCursor() {
+  if (cursorEl && document.documentElement.contains(cursorEl)) return cursorEl;
+  if (!cursorPos) {
+    // Продолжаем с того места, где курсор был на предыдущем уроке.
+    try {
+      cursorPos = JSON.parse(sessionStorage.getItem("mesh-hw-cursor") || "null");
+    } catch (e) {
+      cursorPos = null;
+    }
+    if (!cursorPos) cursorPos = { x: innerWidth * 0.55, y: innerHeight * 0.45 };
+  }
+  cursorEl = document.createElement("div");
+  cursorEl.setAttribute("aria-hidden", "true");
+  cursorEl.style.cssText =
+    "position:fixed;left:0;top:0;width:24px;height:24px;z-index:2147483647;" +
+    "pointer-events:none;transition:opacity .4s;will-change:transform;" +
+    "filter:drop-shadow(0 1px 2px rgba(0,0,0,.35));";
+  cursorEl.innerHTML =
+    '<svg width="24" height="24" viewBox="0 0 24 24" style="display:block;transition:transform .12s">' +
+    '<path d="M3 2 L3 19 L7.5 14.8 L10.4 21.5 L13.3 20.2 L10.5 13.7 L16.8 13.7 Z" ' +
+    'fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+  document.documentElement.appendChild(cursorEl);
+  placeCursor(cursorPos.x, cursorPos.y);
+  return cursorEl;
+}
+
+function placeCursor(x, y) {
+  cursorPos = { x, y };
+  // Кончик стрелки — в точке (3,2) картинки.
+  cursorEl.style.transform = `translate(${x - 3}px, ${y - 2}px)`;
+}
+
+// Плавное движение по слегка изогнутой траектории с разгоном и торможением.
+// Используем setTimeout, а не requestAnimationFrame: если вкладка уйдёт в
+// фон, анимация не зависнет, а просто «перепрыгнет» в конец.
+function moveCursorTo(x, y) {
+  ensureCursor();
+  cursorEl.style.opacity = "1";
+  clearTimeout(hideTimer);
+  const from = { ...cursorPos };
+  const dist = Math.hypot(x - from.x, y - from.y);
+  if (dist < 2) return Promise.resolve();
+  const duration = Math.min(1100, Math.max(320, 250 + dist * 0.7)) * SPEED;
+  const bend = rand(-0.18, 0.18) * dist;
+  const nx = -(y - from.y) / dist;
+  const ny = (x - from.x) / dist;
+  const ctrl = { x: (from.x + x) / 2 + nx * bend, y: (from.y + y) / 2 + ny * bend };
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - start) / duration);
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; // ease-in-out
+      const px = (1 - e) * (1 - e) * from.x + 2 * (1 - e) * e * ctrl.x + e * e * x;
+      const py = (1 - e) * (1 - e) * from.y + 2 * (1 - e) * e * ctrl.y + e * e * y;
+      placeCursor(px, py);
+      if (t < 1) setTimeout(tick, 16);
+      else {
+        try {
+          sessionStorage.setItem("mesh-hw-cursor", JSON.stringify(cursorPos));
+        } catch (err) {}
+        resolve();
+      }
+    };
+    tick();
+  });
+}
+
+function clickRipple(x, y) {
+  const ring = document.createElement("div");
+  ring.style.cssText =
+    `position:fixed;left:${x - 14}px;top:${y - 14}px;width:28px;height:28px;border-radius:50%;` +
+    "border:2px solid rgba(80,70,230,.85);z-index:2147483646;pointer-events:none;" +
+    "transform:scale(.3);opacity:1;transition:transform .45s ease-out,opacity .45s ease-out;";
+  document.documentElement.appendChild(ring);
+  requestAnimationFrame(() => {
+    ring.style.transform = "scale(1.4)";
+    ring.style.opacity = "0";
+  });
+  setTimeout(() => ring.remove(), 600);
+}
+
+async function humanClick(el) {
+  if (!HUMAN_MODE) {
+    realClick(el);
+    return;
+  }
+  let r = el.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > innerHeight) {
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    await sleep(700 * SPEED);
+    r = el.getBoundingClientRect();
+  }
+  // Люди не попадают точно в центр — берём случайную точку ближе к середине.
+  const point = {
+    x: r.left + r.width * rand(0.3, 0.7),
+    y: r.top + r.height * rand(0.35, 0.65),
+  };
+  await moveCursorTo(point.x, point.y);
+  const hover = { bubbles: true, clientX: point.x, clientY: point.y };
+  el.dispatchEvent(new MouseEvent("mouseover", hover));
+  el.dispatchEvent(new MouseEvent("mousemove", hover));
+  await sleep(rand(150, 350) * SPEED);
+
+  const svg = cursorEl.firstChild;
+  svg.style.transform = "scale(.85)";
+  clickRipple(point.x, point.y);
+  realClick(el, point);
+  await sleep(110);
+  svg.style.transform = "";
+  await sleep(rand(80, 180) * SPEED);
+}
+
+async function typeText(ta, text) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+  if (!HUMAN_MODE) {
+    setter.call(ta, text);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+  } else {
+    await sleep(rand(250, 500) * SPEED);
+    for (let i = 1; i <= text.length; i++) {
+      setter.call(ta, text.slice(0, i));
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      const ch = text[i - 1];
+      await sleep((ch === " " ? rand(150, 320) : rand(70, 190)) * SPEED);
+    }
+  }
+  ta.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function hideCursorLater() {
+  if (!cursorEl) return;
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (cursorEl) cursorEl.style.opacity = "0";
+  }, 2500);
 }
 
 // ---------------------------------------------------------------------------
