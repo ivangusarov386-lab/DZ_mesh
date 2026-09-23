@@ -190,24 +190,57 @@ async function advanceToDescriptionForm(totalTimeout = 20000, interval = 400) {
 
 // Короткий снимок подписей видимых кнопок — попадает в лог попапа при
 // ошибке "no-textarea", чтобы не гадать вслепую, какой именно экран
-// оказался на странице в момент сбоя.
-function visibleButtonTexts(max = 10) {
+// оказался на странице в момент сбоя. Для каждой кнопки дополнительно
+// помечаем, была ли она недоступна для клика (disabled) или скрыта —
+// раньше это не показывалось, а именно неактивная кнопка "Прикрепить"
+// (когда в каталоге материалов ничего не выбрано) — самая вероятная
+// причина зависания на "no-textarea".
+function visibleButtonTexts(max = 12) {
   const texts = Array.from(document.querySelectorAll("button"))
-    .map((b) => b.textContent.trim())
-    .filter((t) => t && t.length > 0 && t.length <= 40);
-  return texts.slice(0, max).join(" | ");
+    .map((b) => {
+      const t = b.textContent.trim();
+      if (!t || t.length === 0 || t.length > 40) return null;
+      const flags = [];
+      if (isDisabled(b)) flags.push("disabled");
+      if (!isVisible(b)) flags.push("hidden");
+      return flags.length ? `${t}[${flags.join(",")}]` : t;
+    })
+    .filter(Boolean);
+  const snippet = document.body.innerText.trim().slice(0, 200).replace(/\s+/g, " ");
+  return `${texts.slice(0, max).join(" | ")} :: текст экрана: "${snippet}"`;
 }
 
+function isDisabled(el) {
+  const btn = el.closest ? el.closest("button") : null;
+  if (btn && (btn.disabled || btn.getAttribute("aria-disabled") === "true")) return true;
+  if (el.getAttribute && el.getAttribute("aria-disabled") === "true") return true;
+  if (el.classList && (el.classList.contains("disabled") || el.classList.contains("Mui-disabled"))) {
+    return true;
+  }
+  return false;
+}
+
+function isVisible(el) {
+  return !!(el.offsetParent || (el.getClientRects && el.getClientRects().length));
+}
+
+// Кликает по элементу с заданным текстом. Пропускает недоступные
+// (disabled/скрытые) кандидаты — раньше клик по неактивной кнопке
+// "Прикрепить" в каталоге материалов (когда ничего не выбрано)
+// засчитывался как успешный шаг, хотя на самом деле ничего не
+// происходило, и цикл в advanceToDescriptionForm просто крутился на
+// месте до общего таймаута ("no-textarea").
 function clickByText(text, exact = false) {
   return new Promise((resolve) => {
     const candidates = Array.from(document.querySelectorAll("button, div, span"));
-    const el = candidates.find((e) => {
+    const matches = candidates.filter((e) => {
       if (e.children.length > 2) return false; // пропускаем крупные контейнеры
       const t = e.textContent.trim();
       return exact ? t === text : t.includes(text);
     });
-    if (el) {
-      el.click();
+    const usable = matches.find((e) => isVisible(e) && !isDisabled(e));
+    if (usable) {
+      usable.click();
       resolve(true);
     } else {
       resolve(false);
