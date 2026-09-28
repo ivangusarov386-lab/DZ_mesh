@@ -12,7 +12,12 @@ let state = {
   idx: 0,
   total: 0,
   failed: [],     // имена классов, которые не удалось обработать
-  results: {},    // id урока -> "created" | "exists" | "failed"
+  results: {},    // id урока -> "created" | "exists" | "failed" (копится
+                  // между запусками, чтобы «Продолжить» не проверял заново)
+  stopRequested: false, // нажали «Стоп» — остановиться после текущего урока
+  day: [],        // все уроки выбранного дня — чтобы попап после
+  date: null,     // переоткрытия показал тот же день
+  selected: [],   // id отмеченных галочкой уроков
   log: [],        // текстовые строки для отображения в popup
 };
 
@@ -34,7 +39,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       idx: 0,
       total: (msg.todo || []).length,
       failed: [],
-      results: {},
+      results: { ...state.results },
+      stopRequested: false,
+      day: msg.day || [],
+      date: msg.date || null,
+      selected: msg.selected || [],
       log: [],
     };
     pushLog(`Запуск: уроков в очереди — ${state.total}.`);
@@ -55,10 +64,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // «Стоп»: не обрываем урок на середине (иначе на странице останется
+  // открытая форма), а останавливаемся сразу после текущего урока.
   if (msg.type === "cancel-run") {
-    if (state.running) {
-      state.running = false;
-      pushLog("Остановлено пользователем.");
+    if (state.running && !state.stopRequested) {
+      state.stopRequested = true;
+      pushLog("Стоп: закончу текущий урок и остановлюсь...");
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  // Загрузили новую неделю — старые итоги больше не нужны.
+  if (msg.type === "reset-results") {
+    if (!state.running) {
+      state.results = {};
+      state.day = [];
+      state.date = null;
+      state.selected = [];
+      state.log = [];
     }
     sendResponse({ ok: true });
     return true;
@@ -69,7 +93,7 @@ async function runLoop() {
   let created = 0;
   let existed = 0;
   for (state.idx = 0; state.idx < state.todo.length; state.idx++) {
-    if (!state.running) break; // отменили
+    if (state.stopRequested) break; // нажали «Стоп»
 
     const lesson = state.todo[state.idx];
     pushLog(`(${state.idx + 1}/${state.total}) Открываю урок: ${lesson.group_name}...`);
@@ -99,10 +123,19 @@ async function runLoop() {
     }
 
     // Пауза между уроками — как у человека, который переходит к следующему.
-    if (state.idx < state.todo.length - 1) await sleep(1500 + Math.random() * 1500);
+    if (state.idx < state.todo.length - 1 && !state.stopRequested) {
+      await sleep(1500 + Math.random() * 1500);
+    }
   }
 
+  const left = state.todo.length - state.idx;
   state.running = false;
+  if (state.stopRequested && left > 0) {
+    pushLog(`Остановлено. Создано: ${created}, уже было: ${existed}. Осталось: ${left} — нажмите «Продолжить».`);
+    state.stopRequested = false;
+    return;
+  }
+  state.stopRequested = false;
   pushLog(`Готово. Создано: ${created}, уже было: ${existed}.`);
   if (state.failed.length > 0) {
     pushLog(`НЕ создано (нужно вручную): ${state.failed.join(", ")}`);

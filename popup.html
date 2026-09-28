@@ -5,7 +5,7 @@
 <title>МЭШ — автозадание ДЗ</title>
 <style>
   body {
-    width: 340px;
+    width: 380px;
     font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     padding: 12px;
     color: #222;
@@ -31,20 +31,40 @@
     background: #c9c3f7;
     cursor: default;
   }
+  /* Дни — одной строкой по порядку: Пн, Вт, Ср… */
   #days {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    display: grid;
+    gap: 5px;
     margin-bottom: 10px;
   }
   .day-btn {
     background: #eee;
-    flex: 1 0 30%;
+    padding: 6px 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.25;
+    border: 2px solid transparent;
   }
+  .day-btn .wd { font-weight: 600; font-size: 13px; }
+  .day-btn .dt { font-size: 11px; opacity: .8; }
+  .day-btn.today { border-color: #5b3df5; }
   .day-btn.selected {
     background: #5b3df5;
     color: #fff;
   }
+  .day-btn:disabled { opacity: .5; cursor: default; }
+  .lessons-head {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 2px;
+  }
+  #selectAll {
+    font-size: 12px;
+    color: #5b3df5;
+    text-decoration: none;
+  }
+  #selectAll.disabled { color: #aaa; pointer-events: none; }
   #lessons {
     max-height: 260px;
     overflow-y: auto;
@@ -54,11 +74,16 @@
   }
   .lesson-row {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
     gap: 6px;
     padding: 4px 0;
     border-bottom: 1px solid #f2f2f2;
+    cursor: pointer;
   }
+  .lesson-row input { margin: 0; flex: none; accent-color: #5b3df5; }
+  .lesson-name { flex: 1; }
+  .lesson-status { flex: none; }
+  .lesson-row.off .lesson-name { color: #aaa; text-decoration: line-through; }
   .status-ok { color: #2e7d32; }
   .status-missing { color: #c62828; font-weight: 600; }
   .status-unknown { color: #888; }
@@ -77,14 +102,26 @@
   #runBtn:disabled {
     background: #a5d6a7;
   }
+  #stopBtn {
+    background: #c62828;
+    color: #fff;
+    width: 100%;
+    margin-top: 8px;
+  }
+  #stopBtn:disabled {
+    background: #ef9a9a;
+    cursor: default;
+  }
 </style>
 </head>
 <body>
   <h1>МЭШ — автозадание ДЗ</h1>
   <button id="loadBtn" class="primary">Загрузить текущую неделю</button>
   <div id="days"></div>
+  <div class="lessons-head"><a href="#" id="selectAll" style="display:none;">Снять все</a></div>
   <div id="lessons"></div>
-  <button id="runBtn" style="display:none;">Создать «Не задано.» для отмеченных</button>
+  <button id="runBtn" style="display:none;">Проверить</button>
+  <button id="stopBtn" style="display:none;">Стоп</button>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>
