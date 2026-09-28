@@ -1,0 +1,29 @@
+<!doctype html><html><body style="margin:0;font-family:sans-serif">
+<div id="page" style="padding:20px">
+  <h3>Материалы к уроку</h3><div>Легкая атлетика. Сценарий урока</div>
+  <div id="panel" style="margin-top:600px">
+    <div class="empty"><div id="cards"><h4>Домашнее задание отсутствует</h4><p>Вы пока не добавили ни одного домашнего задания</p></div>
+      <div class="btns">
+        <button id="none">Без домашнего задания</button>
+        <button id="create"><svg width="10" height="10"></svg><span>Создать домашнее задание</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const Q=new URLSearchParams(location.search); const MODE = Q.get("mode") || "ktp";
+if(Q.get("due")) document.getElementById("cards").innerHTML='<div><b>Задание 1</b> Не задано.<div>Когда задано: 21.09.2026 в 21:39</div><div>Проверить к: '+Q.get("due")+'</div><div>Для учеников: 29 из 29</div></div>';
+function overlay(html){const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center';o.innerHTML='<div role="dialog" style="background:#fff;padding:20px;width:500px">'+html+'</div>';document.body.appendChild(o);return o;}
+function catalog(){const o=overlay('<h3>Прикрепление материалов к домашнему заданию</h3><div>список</div><button id="od">Открыть описание</button>');
+  o.querySelector('#od').onclick=()=>{setTimeout(()=>{o.remove();form();},300)};}
+function form(){const o=overlay('<h3>Описание задания</h3><div>Проверить к: 30.09.2026</div><textarea placeholder="Введите значение..."></textarea><br><button id="sub" disabled>Выдать задание</button>');
+  const ta=o.querySelector('textarea'),sub=o.querySelector('#sub');
+  ta.addEventListener('input',()=>{sub.disabled=!ta.value});
+  sub.onclick=()=>{const c=overlay('<p>Подтвердить?</p><button id="cf">Выдать домашнее задание</button>');
+    c.querySelector('#cf').onclick=()=>{c.remove();o.remove();const cards=document.getElementById('cards'); if(cards.querySelector('h4')) cards.innerHTML=''; cards.insertAdjacentHTML('beforeend','<div><b>Задание</b> '+ta.value+'<div>Проверить к: 30.09.2026</div></div>');}}}
+document.getElementById('create').onclick=()=>{setTimeout(()=>{
+  if(MODE==="ktp"){const o=overlay('<p>Добавить материалы из урока КТП?</p><button>Отмена</button><button id="att">Прикрепить</button>');
+    o.querySelector('#att').onclick=()=>{setTimeout(()=>{o.remove();catalog();},300)};}
+  else if(MODE==="direct"){form();} else if(MODE==="dead"){} else if(MODE==="weird"){overlay("<p>Что-то новое</p><button>Непонятная кнопка</button>");} else {catalog();}
+},400)};
+</script></body></html>
