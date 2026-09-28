@@ -57,7 +57,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       );
     return true; // ответ будет отправлен асинхронно
   }
+
+  if (msg.type === "open-journal") {
+    location.href = `https://school.mos.ru/teacher/study-process/journal/my/${msg.groupId}`;
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "read-journal") {
+    waitForEl(
+      () => document.querySelector('[data-test-component^="scheduleLessonCell-"]'),
+      12000
+    ).then((found) => {
+      sendResponse({ ok: !!found, cells: found ? readJournalCells() : [] });
+    });
+    return true; // ответ будет отправлен асинхронно
+  }
 });
+
+// Каждая клетка урока в журнале класса помечена в коде страницы атрибутом
+// вида data-test-component="scheduleLessonCell-<id>-<СТАТУС>", где <id> —
+// тот же номер, что в ссылке на урок (?scheduleItemId=<id>), а <СТАТУС> —
+// например HOMEWORK (ДЗ уже задано) или DEFAULT (ещё нет). Проверено вручную
+// сверкой конкретного урока: одна и та же цифра в обоих местах. Это надёжнее
+// цвета домика — явная пометка, а не пиксели.
+function readJournalCells() {
+  const cells = document.querySelectorAll('[data-test-component^="scheduleLessonCell-"]');
+  const re = /^scheduleLessonCell-(\d+)-(\w+)$/;
+  const out = [];
+  for (const el of cells) {
+    const m = re.exec(el.getAttribute("data-test-component") || "");
+    if (m) out.push({ id: Number(m[1]), status: m[2] });
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Основной сценарий
