@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "check-and-create") {
-    createHomework(msg.text || "Не задано.")
+    createHomework(msg.text || "Не задано.", msg.lessonDate || null)
       .then(sendResponse)
       .catch((e) =>
         sendResponse({ ok: false, reason: "ошибка скрипта: " + (e && e.message), debug: snapshot() })
@@ -89,8 +89,9 @@ function fail(reason, extra) {
   return { ok: false, reason, debug: snapshot() };
 }
 
-async function createHomework(text) {
+async function createHomework(text, lessonDate) {
   trace = [];
+  currentLessonNum = lessonDate ? lessonDate[0] * 10000 + lessonDate[1] * 100 + lessonDate[2] : null;
 
   // 1. Ждём, пока правая панель урока реально дорисуется.
   // Если ДЗ на уроке уже выдано, панель показывает карточку задания с
@@ -109,13 +110,29 @@ async function createHomework(text) {
   );
   if (!panel) return fail("timeout", "панель «Домашнее задание» не загрузилась");
   if (!hasText("Домашнее задание отсутствует")) {
-    // Теперь проверяются ВСЕ уроки дня, поэтому решение «ДЗ уже есть»
-    // важно не принять поспешно: даём панели ещё немного дорисоваться.
+    // Решение «ДЗ уже есть» важно не принять поспешно: даём панели ещё
+    // немного дорисоваться.
     await sleep(1500);
     if (!hasText("Домашнее задание отсутствует")) {
-      const due = (document.body.innerText.match(/Проверить к:?\s*([\d.]+)/) || [])[1];
-      step(due ? `ДЗ на этом уроке уже выдано (проверить к ${due})` : "ДЗ на этом уроке уже выдано");
-      return { ok: true, created: false, reason: "already-exists" };
+      // На странице урока показываются и задания, которые на этот урок
+      // нужно СДАТЬ (выданы раньше, «Проверить к» = дата урока или раньше).
+      // Выданным НА этом уроке считается только задание, которое надо
+      // проверить ПОЗЖЕ даты урока.
+      const due = dueDates();
+      const shown = due.map(fmtDateNum).join(", ");
+      if (currentLessonNum == null) {
+        step(`ДЗ на этом уроке уже выдано (проверить к ${shown || "?"})`);
+        return { ok: true, created: false, reason: "already-exists" };
+      }
+      const later = due.filter((d) => d > currentLessonNum);
+      if (later.length) {
+        step(`ДЗ на этом уроке уже выдано (проверить к ${later.map(fmtDateNum).join(", ")})`);
+        return { ok: true, created: false, reason: "already-exists" };
+      }
+      step(
+        `на уроке только ДЗ к сдаче (проверить к ${shown || "?"}) — ` +
+          `выданного на этом уроке нет, создаю`
+      );
     }
   }
 
@@ -159,8 +176,32 @@ async function createHomework(text) {
   return { ok: true, created: true, verified, debug: verified ? undefined : snapshot() };
 }
 
+// Все даты «Проверить к: ДД.ММ.ГГГГ» на странице — как числа 20260928.
+function dueDates() {
+  const out = [];
+  const re = /Проверить к:?\s*(\d{2})\.(\d{2})\.(\d{4})/g;
+  let m;
+  const t = document.body ? document.body.innerText : "";
+  while ((m = re.exec(t))) out.push(+m[3] * 10000 + +m[2] * 100 + +m[1]);
+  return out;
+}
+
+function fmtDateNum(n) {
+  const d = n % 100;
+  const mo = Math.floor(n / 100) % 100;
+  return `${String(d).padStart(2, "0")}.${String(mo).padStart(2, "0")}.${Math.floor(n / 10000)}`;
+}
+
+let currentLessonNum = null; // дата текущего урока как 20260928
+
 function isSuccess() {
-  return hasText("Домашнее задание создано") || hasText("Задание №1");
+  if (hasText("Домашнее задание создано")) return true;
+  // Пока открыта форма или окно подтверждения — ещё не создано (в форме
+  // тоже может быть видна дата «Проверить к»).
+  if (findDescriptionField() || findClickable(CONFIRM_BTN)) return false;
+  // Появилась карточка, которую надо проверить позже даты урока.
+  if (currentLessonNum != null) return dueDates().some((d) => d > currentLessonNum);
+  return hasText("Задание №1");
 }
 
 // Цикл «экран → действие → дождаться изменения экрана».

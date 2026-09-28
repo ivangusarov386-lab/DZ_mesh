@@ -150,7 +150,11 @@ async function tryCreateHomework(lesson) {
   // клики в content.js попадут по ещё не отрисованному интерфейсу.
   await sleep(1500);
 
-  const resp = await sendToTab(state.tabId, { type: "check-and-create", text: "Не задано." }).catch(
+  const resp = await sendToTab(state.tabId, {
+    type: "check-and-create",
+    text: "Не задано.",
+    lessonDate: lesson.date, // [Y, M, D] — чтобы отличить ДЗ «к сдаче» от выданного на уроке
+  }).catch(
     () => ({ ok: false, reason: "message-failed" })
   );
 
