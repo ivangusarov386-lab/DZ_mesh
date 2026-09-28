@@ -92,10 +92,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function runLoop() {
   let created = 0;
   let existed = 0;
+
+  existed += await preCheckJournals();
+
   for (state.idx = 0; state.idx < state.todo.length; state.idx++) {
     if (state.stopRequested) break; // нажали «Стоп»
 
     const lesson = state.todo[state.idx];
+    if (state.results[lesson.id] === "exists") continue; // уже отмечено журналом выше
+
     pushLog(`(${state.idx + 1}/${state.total}) Открываю урок: ${lesson.group_name}...`);
 
     let outcome = await tryCreateHomework(lesson);
@@ -140,6 +145,70 @@ async function runLoop() {
   if (state.failed.length > 0) {
     pushLog(`НЕ создано (нужно вручную): ${state.failed.join(", ")}`);
   }
+}
+
+// Перед тем как открывать уроки по одному, один раз заходим в журнал
+// каждого нужного класса и смотрим, у каких уроков там уже стоит статус
+// HOMEWORK (см. CLAUDE.md — Иван проверил, что номер в этой пометке совпадает
+// со scheduleItemId урока). Такие уроки не открываем вообще — экономим время.
+// Для всех остальных (DEFAULT, любой незнакомый статус, или если журнал не
+// открылся) ничего не меняем — они идут через обычную проверку на странице
+// урока, как раньше. Решение по ним принимает журнал — Иван попросил делать
+// это полностью автоматически, без дополнительной сверки по странице урока.
+async function preCheckJournals() {
+  const groupIds = [...new Set(state.todo.map((l) => l.group_id).filter((g) => g != null))];
+  let skipped = 0;
+
+  for (const groupId of groupIds) {
+    if (state.stopRequested) break;
+    const lessonsInGroup = state.todo.filter((l) => l.group_id === groupId);
+    pushLog(`Смотрю журнал «${lessonsInGroup[0].group_name}»...`);
+
+    const cells = await readJournalFor(groupId);
+    if (!cells) {
+      pushLog(`   журнал не открылся, проверю уроки этого класса как обычно`);
+      continue;
+    }
+
+    const statusById = new Map(cells.map((c) => [c.id, c.status]));
+    let foundHere = 0;
+    for (const lesson of lessonsInGroup) {
+      if (statusById.get(lesson.id) === "HOMEWORK") {
+        state.results[lesson.id] = "exists";
+        foundHere++;
+      }
+    }
+    if (foundHere > 0) {
+      skipped += foundHere;
+      pushLog(`   в журнале уже видно ДЗ на ${foundHere} из ${lessonsInGroup.length} урок(ов) — не открываю их`);
+    }
+  }
+  return skipped;
+}
+
+function readJournalFor(groupId) {
+  return openJournalAndWaitLoad(groupId)
+    .then(() => sendToTab(state.tabId, { type: "read-journal" }))
+    .then((resp) => (resp && resp.ok ? resp.cells : null))
+    .catch(() => null);
+}
+
+function openJournalAndWaitLoad(groupId) {
+  return new Promise((resolve) => {
+    const tabId = state.tabId;
+    const listener = (updatedTabId, info) => {
+      if (updatedTabId === tabId && info.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    sendToTab(tabId, { type: "open-journal", groupId }).catch(() => {});
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 9000);
+  });
 }
 
 async function tryCreateHomework(lesson) {
