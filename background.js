@@ -93,13 +93,12 @@ async function runLoop() {
   let created = 0;
   let existed = 0;
 
-  existed += await preCheckJournals();
+  await peekJournals(); // только логирует для сравнения, решения не меняет (см. комментарий ниже)
 
   for (state.idx = 0; state.idx < state.todo.length; state.idx++) {
     if (state.stopRequested) break; // нажали «Стоп»
 
     const lesson = state.todo[state.idx];
-    if (state.results[lesson.id] === "exists") continue; // уже отмечено журналом выше
 
     pushLog(`(${state.idx + 1}/${state.total}) Открываю урок: ${lesson.group_name}...`);
 
@@ -147,43 +146,44 @@ async function runLoop() {
   }
 }
 
-// Перед тем как открывать уроки по одному, один раз заходим в журнал
-// каждого нужного класса и смотрим, у каких уроков там уже стоит статус
-// HOMEWORK (см. CLAUDE.md — Иван проверил, что номер в этой пометке совпадает
-// со scheduleItemId урока). Такие уроки не открываем вообще — экономим время.
-// Для всех остальных (DEFAULT, любой незнакомый статус, или если журнал не
-// открылся) ничего не меняем — они идут через обычную проверку на странице
-// урока, как раньше. Решение по ним принимает журнал — Иван попросил делать
-// это полностью автоматически, без дополнительной сверки по странице урока.
-async function preCheckJournals() {
+// ВРЕМЕННО ТОЛЬКО ДЛЯ СРАВНЕНИЯ, РЕШЕНИЙ НЕ ПРИНИМАЕТ. 29.09.2026 статус
+// HOMEWORK клетки САМОГО урока совпал с уроком, на который Иван вживую видел
+// красный домик (т.е. ДЗ туда ещё не поставлено). Похоже, домик/статус
+// клетки урока показывает не «задано ИМЕННО на этом уроке», а «сюда попадает
+// срок сдачи» (в т.ч. заданного раньше) — ровно та же путаница, что была с
+// зелёным домиком в расписании (см. «Факты про МЭШ»). На странице урока это
+// решается проверкой даты «Проверить к» СТРОГО ПОЗЖЕ даты урока; в журнале
+// эквивалент — смотреть статус СЛЕДУЮЩЕЙ после этого урока клетки (туда
+// должен попасть срок сдачи задания, выданного сегодня), а не клетки самого
+// урока. cells от readJournalCells() идут в порядке документа слева направо,
+// то есть уже в хронологическом порядке — следующая клетка после урока по
+// индексу и есть следующая дата, без разбора месяцев/заголовков таблицы.
+// Функция пока только пишет в лог для сравнения с тем, что реально покажет
+// страница урока — решения не меняет, пока не увидим, что это совпадает.
+async function peekJournals() {
   const groupIds = [...new Set(state.todo.map((l) => l.group_id).filter((g) => g != null))];
-  let skipped = 0;
 
   for (const groupId of groupIds) {
     if (state.stopRequested) break;
     const lessonsInGroup = state.todo.filter((l) => l.group_id === groupId);
-    pushLog(`Смотрю журнал «${lessonsInGroup[0].group_name}»...`);
+    pushLog(`Смотрю журнал «${lessonsInGroup[0].group_name}» (только для сравнения)...`);
 
     const cells = await readJournalFor(groupId);
     if (!cells) {
-      pushLog(`   журнал не открылся, проверю уроки этого класса как обычно`);
+      pushLog(`   журнал не открылся`);
       continue;
     }
 
-    const statusById = new Map(cells.map((c) => [c.id, c.status]));
-    let foundHere = 0;
     for (const lesson of lessonsInGroup) {
-      if (statusById.get(lesson.id) === "HOMEWORK") {
-        state.results[lesson.id] = "exists";
-        foundHere++;
+      const idx = cells.findIndex((c) => c.id === lesson.id);
+      const next = idx >= 0 ? cells[idx + 1] : null;
+      if (!next) {
+        pushLog(`   журнал: следующая дата после урока пока не видна — сверю по странице урока`);
+      } else {
+        pushLog(`   журнал (следующая дата после урока): ${next.status} — сверю по странице урока`);
       }
     }
-    if (foundHere > 0) {
-      skipped += foundHere;
-      pushLog(`   в журнале уже видно ДЗ на ${foundHere} из ${lessonsInGroup.length} урок(ов) — не открываю их`);
-    }
   }
-  return skipped;
 }
 
 function readJournalFor(groupId) {
