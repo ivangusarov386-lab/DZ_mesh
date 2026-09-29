@@ -21,6 +21,13 @@ const CASES = [
       window.chrome = { runtime: {
         sendMessage: (m) => { if (m.type === 'hw-step') console.log(m.text); return Promise.resolve(); },
         onMessage: { addListener: (f) => { window.__l = f; } },
+      }, storage: {
+        // Реальный chrome.storage — включено по умолчанию, как в настоящем
+        // браузере. Без этого стаба content.js должен всё равно работать
+        // (см. try/catch вокруг chrome.storage в content.js), но со стабом
+        // проверяется настоящий путь, а не запасной.
+        local: { get: (defaults, cb) => cb({ ...defaults, enabled: true }) },
+        onChanged: { addListener: () => {} },
       } };
     });
     await page.goto('file://' + __dirname + '/mock.html?' + q);

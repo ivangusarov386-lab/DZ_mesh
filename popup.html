@@ -14,6 +14,24 @@
     font-size: 15px;
     margin: 0 0 10px;
   }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .toggle-row input { accent-color: #5b3df5; width: 16px; height: 16px; }
+  #disabledNotice {
+    background: #fff3e0;
+    color: #7a4a00;
+    border: 1px solid #ffcc80;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
   button {
     cursor: pointer;
     border: none;
@@ -116,6 +134,13 @@
 </head>
 <body>
   <h1>МЭШ — автозадание ДЗ</h1>
+  <label class="toggle-row">
+    <input type="checkbox" id="enabledToggle" checked />
+    <span>Расширение включено</span>
+  </label>
+  <div id="disabledNotice" style="display:none;">
+    Выключено — ничего не проверяется и не создаётся. Включите переключатель выше, чтобы пользоваться.
+  </div>
   <button id="loadBtn" class="primary">Загрузить текущую неделю</button>
   <div id="days"></div>
   <div class="lessons-head"><a href="#" id="selectAll" style="display:none;">Снять все</a></div>

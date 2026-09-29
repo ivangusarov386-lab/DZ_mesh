@@ -17,6 +17,7 @@ let running = false;
 let stopping = false;
 let ecCount = 0;            // замечено записей "внеурочная" (ВН) — пропущено
 let aeCount = 0;            // замечено записей "доп. образование" — пропущено
+let extensionEnabled = true; // переключатель вверху попапа — полностью гасит расширение
 
 const daysEl = document.getElementById("days");
 const lessonsEl = document.getElementById("lessons");
@@ -25,6 +26,38 @@ const runBtn = document.getElementById("runBtn");
 const stopBtn = document.getElementById("stopBtn");
 const loadBtn = document.getElementById("loadBtn");
 const selectAllEl = document.getElementById("selectAll");
+const enabledToggle = document.getElementById("enabledToggle");
+const disabledNotice = document.getElementById("disabledNotice");
+
+// Выключатель вверху попапа: полностью гасит активность content.js на
+// странице МЭШ. Добавлен, потому что параллельно стоит ещё одно расширение
+// для МЭШ, и они могут конфликтовать (оба лезут в одну страницу). По
+// умолчанию включено — ничего не меняется в поведении, пока сам не выключишь.
+chrome.storage.local.get({ enabled: true }, (data) => {
+  extensionEnabled = data.enabled;
+  enabledToggle.checked = extensionEnabled;
+  applyEnabledState();
+});
+
+enabledToggle.addEventListener("change", async () => {
+  extensionEnabled = enabledToggle.checked;
+  chrome.storage.local.set({ enabled: extensionEnabled });
+  applyEnabledState();
+  if (!extensionEnabled && running) {
+    await chrome.runtime.sendMessage({ type: "cancel-run" }).catch(() => {});
+  }
+});
+
+function applyEnabledState() {
+  disabledNotice.style.display = extensionEnabled ? "none" : "block";
+  loadBtn.disabled = !extensionEnabled;
+  if (!extensionEnabled) {
+    runBtn.style.display = "none";
+    stopBtn.style.display = "none";
+  } else if (selectedDate) {
+    updateButtons();
+  }
+}
 
 function log(text, replace = false) {
   if (replace) {
@@ -63,7 +96,7 @@ async function getActiveTab() {
 })();
 
 loadBtn.addEventListener("click", async () => {
-  if (running) return;
+  if (running || !extensionEnabled) return;
   lessons = [];
   results = {};
   excluded = new Set();
@@ -243,6 +276,11 @@ selectAllEl.addEventListener("click", (e) => {
 });
 
 function updateButtons() {
+  if (!extensionEnabled) {
+    runBtn.style.display = "none";
+    stopBtn.style.display = "none";
+    return;
+  }
   const list = dayLessons();
   const allOn = list.length > 0 && list.every((l) => !excluded.has(l.id));
   selectAllEl.textContent = allOn ? "Снять все" : "Выбрать все";

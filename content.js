@@ -25,14 +25,40 @@
 //  3. Каждый шаг отправляется в лог попапа, так что по логу видно, на каком
 //     именно экране всё остановилось.
 
+// Выключатель расширения (попап → чекбокс «Включено»). По умолчанию true —
+// пока настройка не прочиталась из хранилища, ничего не меняем в поведении.
+// chrome.storage.onChanged даёт эффект сразу, без перезагрузки страницы МЭШ.
+// В try/catch специально: если storage вдруг недоступен, весь остальной
+// код ниже (включая chrome.runtime.onMessage.addListener) всё равно должен
+// заработать как раньше — выключатель не должен иметь возможность сломать
+// основную логику.
+let extensionEnabled = true;
+try {
+  chrome.storage.local.get({ enabled: true }, (data) => {
+    extensionEnabled = data.enabled;
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && "enabled" in changes) extensionEnabled = changes.enabled.newValue;
+  });
+} catch (e) {
+  /* нет storage — считаем включённым, как было до выключателя */
+}
+
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const msg = event.data;
   if (!msg || msg.source !== "mesh-hw-ext") return;
+  if (!extensionEnabled) return;
   chrome.runtime.sendMessage({ type: msg.type, data: msg.data }).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Выключено — ведём себя так, будто расширения нет: не отвечаем и
+  // ничего не делаем. На случай гонки с другим расширением МЭШ (Иван
+  // подозревает конфликт) это самый надёжный способ полностью замолчать,
+  // не трогая саму логику ниже.
+  if (!extensionEnabled) return false;
+
   if (msg.type === "reload-schedule") {
     if (location.href.startsWith("https://school.mos.ru/teacher/account/schedule")) {
       location.reload();

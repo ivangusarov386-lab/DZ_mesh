@@ -23,6 +23,9 @@ const EXPECTED = [
     window.chrome = { runtime: {
       sendMessage: (m) => { if (m.type === 'hw-step') console.log(m.text); return Promise.resolve(); },
       onMessage: { addListener: (f) => { window.__l = f; } },
+    }, storage: {
+      local: { get: (defaults, cb) => cb({ ...defaults, enabled: true }) },
+      onChanged: { addListener: () => {} },
     } };
   });
   await page.goto('file://' + __dirname + '/mock_journal.html');
