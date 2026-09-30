@@ -388,7 +388,20 @@ function renderFromStatus(status) {
 
 function updateAutopilotVisibility() {
   autopilotBox.style.display = extensionEnabled && selectedDate ? "block" : "none";
+  updateApButtonLabel();
 }
+
+// Раньше кнопка называлась «Начать автопилот сейчас» — Иван нажал, статус
+// внизу обновился правильно, но название звучало так, будто что-то должно
+// произойти на странице, и он решил, что кнопка не сработала. Открытие
+// урока — это ещё не реализовано (см. «Идеи на будущее», этап 3), поэтому
+// название честно говорит «тест», а не «начать».
+function updateApButtonLabel() {
+  apStartBtn.textContent = apManualToggle.checked
+    ? "Подтвердить план (тест)"
+    : "Вооружить на этот день (тест)";
+}
+apManualToggle.addEventListener("change", updateApButtonLabel);
 
 function formatApDate(d) {
   return `${String(d[2]).padStart(2, "0")}.${String(d[1]).padStart(2, "0")}`;
@@ -402,11 +415,11 @@ function renderAutopilotStatus(plan) {
   }
   const n = plan.lessons.length;
   if (plan.confirmed) {
-    apStatusEl.textContent = `Подтверждён на ${formatApDate(plan.date)} — ${n} урок(ов).${
-      plan.manual ? " (ручной запуск)" : ""
-    } Дальше открытие уроков автопилот пока не делает — см. CLAUDE.md.`;
+    apStatusEl.textContent = `✓ Тест прошёл: план на ${formatApDate(plan.date)} (${n} урок(ов)) подтверждён${
+      plan.manual ? " вручную" : ""
+    }. Урок(и) при этом НЕ открывались и ДЗ не создавалось — этого шага пока нет.`;
   } else {
-    apStatusEl.textContent = `Вооружён на ${formatApDate(plan.date)} — ${n} урок(ов). Жду будильника (за 20 мин до первого урока) и подтверждения в уведомлении.`;
+    apStatusEl.textContent = `✓ Вооружён на ${formatApDate(plan.date)} — ${n} урок(ов). Жду будильника (за 20 мин до первого урока) и подтверждения в уведомлении.`;
   }
   apCancelEl.style.display = "inline-block";
 }
