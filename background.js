@@ -26,6 +26,9 @@ let state = {
   date: null,     // переоткрытия показал тот же день
   selected: [],   // id отмеченных галочкой уроков
   log: [],        // текстовые строки для отображения в popup
+  weekLessons: [], // ВСЯ неделя из schedule_items — см. комментарий у обработчика ниже
+  ecCount: 0,      // внеурочка за неделю (только счётчик)
+  aeCount: 0,      // доп. образование за неделю (только счётчик)
 };
 
 function pushLog(line) {
@@ -34,6 +37,33 @@ function pushLog(line) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Данные недели из schedule_items/ec_schedule_items/ae_schedule_items —
+  // content.js рассылает их ОДИН РАЗ, когда inject.js перехватил ответ
+  // (chrome.runtime.sendMessage, не chrome.tabs.sendMessage — у сообщения
+  // нет конкретного адресата, слушает кто угодно). Раньше это слушал только
+  // popup.js — если попап был закрыт именно в этот момент (Chrome закрывает
+  // попап от любой потери фокуса, это может случиться от самой перезагрузки
+  // страницы), данные терялись НАВСЕГДА для этой загрузки, и ничего, кроме
+  // повторной перезагрузки страницы (в расчёте, что в этот раз попап будет
+  // открыт), не помогало. Жалоба Ивана 30.09.2026: «Загрузить текущую
+  // неделю» срабатывает не всегда. Теперь фон тоже слушает и запоминает —
+  // popup.js может забрать данные через get-status в любой момент, даже
+  // спустя долгое время после того, как они пришли.
+  if (msg.type === "schedule_items") {
+    state.weekLessons = (msg.data || []).filter(
+      (l) => l && l.id != null && l.group_id != null && l.class_unit_id != null
+    );
+    return false;
+  }
+  if (msg.type === "ec_schedule_items") {
+    state.ecCount = (msg.data || []).length;
+    return false;
+  }
+  if (msg.type === "ae_schedule_items") {
+    state.aeCount = (msg.data || []).length;
+    return false;
+  }
+
   if (msg.type === "start-run") {
     if (state.running) {
       sendResponse({ ok: false, reason: "already-running" });
@@ -52,6 +82,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       date: msg.date || null,
       selected: msg.selected || [],
       log: [],
+      weekLessons: state.weekLessons,
+      ecCount: state.ecCount,
+      aeCount: state.aeCount,
     };
     pushLog(`Запуск: уроков в очереди — ${state.total}.`);
     runLoop(); // не ждём — работает в фоне
@@ -82,7 +115,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // Загрузили новую неделю — старые итоги больше не нужны.
+  // Загрузили новую неделю — старые итоги и старые данные недели больше не нужны.
   if (msg.type === "reset-results") {
     if (!state.running) {
       state.results = {};
@@ -90,6 +123,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       state.date = null;
       state.selected = [];
       state.log = [];
+      state.weekLessons = [];
+      state.ecCount = 0;
+      state.aeCount = 0;
     }
     sendResponse({ ok: true });
     return true;

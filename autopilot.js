@@ -269,6 +269,22 @@ function closeMaterialForLesson(lessonId) {
   });
 }
 
+// Закрывает ВСЕ сейчас отслеживаемые вкладки с материалами, а не одну
+// конкретную. Кнопка «Закрыть» в попапе специально устроена так, чтобы НЕ
+// полагаться на память о том, для какого урока открывала — это попапный
+// JS-объект, а Chrome закрывает попап от любой потери фокуса, и после
+// переоткрытия эта память пропадает. Живой баг 30.09.2026: Иван открыл
+// материал («Открыть» сработало), но «Закрыть» не реагировало — почти
+// наверняка потому, что попап успел переоткрыться до второго клика.
+function closeAllMaterialTabs() {
+  const lessonIds = Object.keys(materialTabs);
+  if (lessonIds.length === 0) return Promise.resolve({ ok: true, closedCount: 0 });
+  return Promise.all(lessonIds.map((id) => closeMaterialForLesson(id))).then((results) => ({
+    ok: true,
+    closedCount: results.filter((r) => r.closed).length,
+  }));
+}
+
 chrome.notifications.onButtonClicked.addListener(async (notifId, btnIdx) => {
   if (notifId !== AUTOPILOT_NOTIF) return;
   chrome.notifications.clear(AUTOPILOT_NOTIF);
@@ -310,7 +326,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg.type === "autopilot-open-material") {
       openMaterialForLesson(msg.tabId, msg.lessonId).then((r) => sendResponse(r));
     } else if (msg.type === "autopilot-close-material") {
-      closeMaterialForLesson(msg.lessonId).then((r) => sendResponse(r));
+      // lessonId не передан из попапа (см. комментарий у closeAllMaterialTabs) —
+      // но поддерживаем и точечное закрытие по id, если он всё же есть.
+      const closer = msg.lessonId != null ? closeMaterialForLesson(msg.lessonId) : closeAllMaterialTabs();
+      closer.then((r) => sendResponse(r));
     } else {
       sendResponse({ ok: false, reason: "unknown-type" });
     }

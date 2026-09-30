@@ -90,13 +90,31 @@ async function getActiveTab() {
 
   const status = await chrome.runtime.sendMessage({ type: "get-status" }).catch(() => null);
   if (!status) return;
-  if (status.day && status.day.length && lessons.length === 0) {
-    lessons = status.day;
+
+  // Данные недели (schedule_items) теперь хранятся в фоне независимо от
+  // того, был ли запуск — восстанавливаем их в любом случае. Раньше это
+  // приходило только живым сообщением, пока попап открыт, и если попап
+  // закрылся ровно в момент загрузки (бывает — Chrome закрывает попап от
+  // любой потери фокуса), данные терялись насовсем, помогала только
+  // повторная перезагрузка страницы наудачу. Жалоба Ивана 30.09.2026:
+  // «Загрузить текущую неделю» срабатывает не всегда.
+  if (status.weekLessons && status.weekLessons.length) {
+    lessons = status.weekLessons;
+    ecCount = status.ecCount || 0;
+    aeCount = status.aeCount || 0;
+  }
+
+  if (status.day && status.day.length) {
     selectedDate = status.date;
     const selectedIds = new Set((status.selected || []).map(String));
-    excluded = new Set(lessons.filter((l) => !selectedIds.has(String(l.id))).map((l) => l.id));
+    excluded = new Set(status.day.filter((l) => !selectedIds.has(String(l.id))).map((l) => l.id));
     Object.assign(results, status.results || {});
+    if (lessons.length === 0) lessons = status.day; // запасной вариант, если weekLessons почему-то пусты
+  }
+
+  if (lessons.length) {
     renderDays();
+    updateSummary();
   }
   if (status.running || (status.log && status.log.length)) {
     renderFromStatus(status);
@@ -460,12 +478,9 @@ apCancelEl.addEventListener("click", async (e) => {
 });
 
 // Тест этапа 3 (открытие материала урока) — работает на первом отмеченном
-// галочкой уроке выбранного дня. apMaterialLessonId запоминает, у какого
-// урока сейчас (предположительно) открыта вкладка с материалом, чтобы
-// кнопка «Закрыть» знала, что закрывать — это состояние только в попапе,
-// переживает его закрытие не будет (это тестовая кнопка, не часть плана).
-let apMaterialLessonId = null;
-
+// галочкой уроке выбранного дня. Какая именно вкладка открыта, помнит
+// autopilot.js (materialTabs) — попап специально ничего сам не запоминает,
+// см. комментарий у apCloseMaterialBtn ниже.
 apOpenMaterialBtn.addEventListener("click", async () => {
   const day = dayLessons();
   const chosen = day.filter((l) => !excluded.has(l.id));
@@ -493,28 +508,27 @@ apOpenMaterialBtn.addEventListener("click", async () => {
         : "Материал не открылся.";
     return;
   }
-  apMaterialLessonId = lesson.id;
   apMaterialStatusEl.textContent = `✓ Материал урока «${lesson.group_name}» открыт в новой вкладке.`;
 });
 
+// Специально закрывает ВСЁ, что сейчас отслеживает фон, а не «запомненный»
+// в попапе id урока — попап Chrome может закрыть в любой момент (например,
+// от потери фокуса), и такая память тогда пропадает. Живой баг 30.09.2026:
+// Иван открыл материал («Открыть» сработало), а «Закрыть» не реагировало —
+// почти наверняка именно поэтому.
 apCloseMaterialBtn.addEventListener("click", async () => {
-  if (apMaterialLessonId == null) {
-    apMaterialStatusEl.textContent = "Сначала нужно открыть материал — сейчас закрывать нечего.";
-    return;
-  }
   apCloseMaterialBtn.disabled = true;
-  const resp = await chrome.runtime
-    .sendMessage({ type: "autopilot-close-material", lessonId: apMaterialLessonId })
-    .catch(() => null);
+  apMaterialStatusEl.textContent = "Закрываю...";
+  const resp = await chrome.runtime.sendMessage({ type: "autopilot-close-material" }).catch(() => null);
   apCloseMaterialBtn.disabled = false;
   if (!resp || !resp.ok) {
     apMaterialStatusEl.textContent = "Не удалось закрыть: " + (resp ? resp.reason : "нет ответа от фона");
     return;
   }
-  apMaterialStatusEl.textContent = resp.closed
-    ? "✓ Вкладка с материалом закрыта."
-    : "Вкладка уже была закрыта (или не открывалась).";
-  apMaterialLessonId = null;
+  apMaterialStatusEl.textContent =
+    resp.closedCount > 0
+      ? `✓ Закрыто вкладок: ${resp.closedCount}.`
+      : "Открытых вкладок с материалом сейчас нет.";
 });
 
 refreshAutopilotStatus();

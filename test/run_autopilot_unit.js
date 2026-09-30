@@ -263,6 +263,20 @@ function timeOf(d) {
   const closeResp2 = await sendMsg({ type: "autopilot-close-material", lessonId: 999 });
   checks.push(["закрытие несуществующей вкладки — closed:false, не ошибка", closeResp2 && closeResp2.ok === true && closeResp2.closed === false]);
 
+  // --- Случай 14: «Закрыть» БЕЗ lessonId (как теперь шлёт попап — см. баг
+  // 30.09.2026, когда попап переоткрылся и забыл, для какого урока открывал)
+  // — закрывает ВСЕ сейчас отслеживаемые вкладки разом ---
+  openMaterialResponse = { ok: true, opened: true };
+  const openA = await sendMsg({ type: "autopilot-open-material", tabId: MESH_TAB_ID, lessonId: 601 });
+  const openB = await sendMsg({ type: "autopilot-open-material", tabId: MESH_TAB_ID, lessonId: 602 });
+  const closeAllResp = await sendMsg({ type: "autopilot-close-material" }); // без lessonId
+  checks.push(["закрыть без lessonId — закрывает обе открытые вкладки", closeAllResp && closeAllResp.ok === true && closeAllResp.closedCount === 2]);
+  checks.push(["закрыть без lessonId — реально вызван remove для обеих", removedTabIds.includes(openA.tabId) && removedTabIds.includes(openB.tabId)]);
+
+  // --- Случай 15: «Закрыть» без lessonId, когда открытых вкладок нет ---
+  const closeAllEmptyResp = await sendMsg({ type: "autopilot-close-material" });
+  checks.push(["закрыть без lessonId, нечего закрывать — closedCount:0, не ошибка", closeAllEmptyResp && closeAllEmptyResp.ok === true && closeAllEmptyResp.closedCount === 0]);
+
   let allOk = true;
   for (const [name, ok] of checks) {
     console.log((ok ? "OK  " : "FAIL") + " — " + name);

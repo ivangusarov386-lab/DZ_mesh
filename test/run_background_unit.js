@@ -84,13 +84,29 @@ const src = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8")
 vm.runInContext(src, sandbox, { filename: "background.js" });
 
 const todo = [
-  { id: 1, group_id: 101, group_name: "5А Математика", date: [2026, 9, 28], time: [9, 0] },
-  { id: 2, group_id: 101, group_name: "5А Математика", date: [2026, 9, 28], time: [10, 0] },
-  { id: 3, group_id: 202, group_name: "6Б Физика", date: [2026, 9, 28], time: [11, 0] },
-  { id: 4, group_id: 303, group_name: "7В Химия", date: [2026, 9, 28], time: [12, 0] },
+  { id: 1, group_id: 101, class_unit_id: 1001, group_name: "5А Математика", date: [2026, 9, 28], time: [9, 0] },
+  { id: 2, group_id: 101, class_unit_id: 1001, group_name: "5А Математика", date: [2026, 9, 28], time: [10, 0] },
+  { id: 3, group_id: 202, class_unit_id: 1002, group_name: "6Б Физика", date: [2026, 9, 28], time: [11, 0] },
+  { id: 4, group_id: 303, class_unit_id: 1003, group_name: "7В Химия", date: [2026, 9, 28], time: [12, 0] },
 ];
 
+// Данные недели (schedule_items и т.п.) — теперь фон их тоже запоминает, а
+// не только popup.js (30.09.2026, из-за жалобы Ивана: «Загрузить текущую
+// неделю» срабатывает не всегда — похоже, попап иногда закрывается ровно в
+// момент, когда content.js рассылает эти сообщения, и раньше данные
+// терялись насовсем). Один "плохой" элемент без group_id/class_unit_id —
+// проверяем тот же фильтр, что раньше был только в popup.js.
+const fakeWeekData = [...todo, { note: "без id/group_id/class_unit_id — должен отфильтроваться" }];
+
 (async () => {
+  chrome.runtime._listener({ type: "schedule_items", data: fakeWeekData }, {}, () => {});
+  chrome.runtime._listener({ type: "ec_schedule_items", data: [1, 2] }, {}, () => {});
+  chrome.runtime._listener({ type: "ae_schedule_items", data: [1] }, {}, () => {});
+  const statusBeforeRun = await new Promise((resolve) => chrome.runtime._listener({ type: "get-status" }, {}, resolve));
+  console.log("Данные недели ДО запуска:", JSON.stringify({
+    weekLessons: statusBeforeRun.weekLessons.length, ecCount: statusBeforeRun.ecCount, aeCount: statusBeforeRun.aeCount,
+  }));
+
   const resp = await new Promise((resolve) => {
     chrome.runtime._listener(
       { type: "start-run", tabId: 999, todo, day: todo, date: [2026, 9, 28], selected: [1, 2, 3] },
@@ -137,7 +153,21 @@ const todo = [
     ["для урока 3 (последняя клетка) — сообщение «не видна», без ошибки", fullLog.includes("следующая дата после урока пока не видна")],
     // Урок 4: журнал вообще не открылся — отдельное, не спутанное с предыдущим сообщение.
     ["для урока 4 (журнал не открылся) — отдельное сообщение", fullLog.includes("журнал не открылся")],
+    // Данные недели, отправленные ДО start-run, должны были сохраниться.
+    ["данные недели: «плохой» элемент отфильтрован (4, не 5)", statusBeforeRun.weekLessons.length === 4],
+    ["данные недели: ecCount/aeCount верные", statusBeforeRun.ecCount === 2 && statusBeforeRun.aeCount === 1],
+    // start-run пересобирает state с нуля — данные недели не должны потеряться.
+    ["данные недели пережили start-run", status.weekLessons.length === 4 && status.ecCount === 2 && status.aeCount === 1],
   ];
+
+  // reset-results (как при «Загрузить текущую неделю») должен чистить и
+  // данные недели — иначе после новой загрузки останется старое.
+  await new Promise((resolve) => chrome.runtime._listener({ type: "reset-results" }, {}, resolve));
+  const statusAfterReset = await new Promise((resolve) => chrome.runtime._listener({ type: "get-status" }, {}, resolve));
+  checks.push([
+    "reset-results очищает данные недели",
+    statusAfterReset.weekLessons.length === 0 && statusAfterReset.ecCount === 0 && statusAfterReset.aeCount === 0,
+  ]);
 
   let allOk = true;
   for (const [name, ok] of checks) {
