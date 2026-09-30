@@ -99,7 +99,65 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true; // ответ будет отправлен асинхронно
   }
+
+  if (msg.type === "open-material") {
+    openLessonMaterial()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, reason: "ошибка скрипта: " + (e && e.message), debug: snapshot() }));
+    return true; // ответ будет отправлен асинхронно
+  }
 });
+
+// Кнопка «...» у карточки материала урока (панель «Материалы к уроку») —
+// как и у клеток журнала, у неё есть свой data-test-component, надёжнее
+// случайных сгенерированных классов (у самих классов в разметке МЭШ — явно
+// хешированные имена вроде "D3rlmmYgc0HNOLcY", на них полагаться нельзя).
+// Подтверждено Иваном через DevTools 30.09.2026:
+// data-test-component="materialCardMenuList-<uuid>". Рядом есть похожая
+// materialCardDeleteUp-<uuid> — это кнопка «X» (удалить), её не трогаем.
+function findMaterialMenuButtons() {
+  return Array.from(
+    document.querySelectorAll('[data-test-component^="materialCardMenuList-"]')
+  ).filter(isVisible);
+}
+
+// Открывает материал урока: «...» у карточки материала → «Просмотреть» в
+// открывшемся меню. Подтверждено Иваном 30.09.2026: «Просмотреть» открывает
+// НОВУЮ вкладку (не меняет адрес в текущей) — эта функция только доводит
+// клик до конца на странице урока, саму новую вкладку ловит фон
+// (chrome.tabs.onCreated), это уже не забота content.js.
+async function openLessonMaterial() {
+  const buttons = findMaterialMenuButtons();
+  if (buttons.length === 0) {
+    step("материала к уроку нет — пропускаю открытие");
+    return { ok: true, opened: false, reason: "no-material" };
+  }
+  if (buttons.length > 1) {
+    // Бывает редко (со слов Ивана) — на всякий случай не гадаем, какой
+    // материал открывать, просто пропускаем этот шаг.
+    step(`материалов у урока несколько (${buttons.length}) — не знаю, какой открыть, пропускаю`);
+    return { ok: true, opened: false, reason: "multiple-materials" };
+  }
+
+  const menuBtn = clickTarget(buttons[0]);
+  if (!isVisible(menuBtn) || isDisabled(menuBtn) || !isOnTop(menuBtn)) {
+    return fail("menu-button-not-clickable", "кнопка «...» у материала сейчас не нажимается");
+  }
+
+  await think();
+  step("нажимаю «...» у материала урока");
+  await humanClick(menuBtn);
+
+  const viewBtn = await waitForEl(() => findClickable("Просмотреть"), 4000);
+  if (!viewBtn) return fail("no-view-button", "меню материала открылось, но кнопки «Просмотреть» не видно");
+
+  await think(400, 900);
+  step("нажимаю «Просмотреть»");
+  await humanClick(viewBtn);
+
+  hideCursorLater();
+  return { ok: true, opened: true };
+}
 
 // Каждая клетка урока в журнале класса помечена в коде страницы атрибутом
 // вида data-test-component="scheduleLessonCell-<id>-<СТАТУС>", где <id> —

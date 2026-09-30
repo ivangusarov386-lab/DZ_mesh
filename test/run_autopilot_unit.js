@@ -1,9 +1,12 @@
-// Юнит-тест autopilot.js (этап 1: вооружить день → будильник за 20 минут
-// до первого урока → уведомление «Да, начинаем»/«Отменить на сегодня»)
-// БЕЗ браузера — подставляем chrome.storage/chrome.alarms/chrome.notifications
-// через Node vm, как run_background_unit.js подставляет chrome.tabs.
-// Открытие материала урока и закрытие вкладки здесь не тестируются — в
-// autopilot.js их пока нет (см. комментарий в начале файла).
+// Юнит-тест autopilot.js БЕЗ браузера — подставляет chrome.storage/
+// chrome.alarms/chrome.notifications/chrome.tabs через Node vm, как
+// run_background_unit.js подставляет chrome.tabs для background.js.
+// Покрывает: вооружить день → будильник за 20 минут до первого урока →
+// уведомление «Да, начинаем»/«Отменить на сегодня» (этап 1); ручной запуск
+// и отказ команд при выключенном расширении (этап 2); открытие материала
+// урока (нет материала / один / несколько) и закрытие открытой вкладки
+// (этап 3) — content.js здесь не участвует, chrome.tabs.sendMessage сам
+// отвечает тем, что задано в openMaterialResponse, имитируя ответ страницы.
 // Запуск: node run_autopilot_unit.js
 const fs = require("fs");
 const path = require("path");
@@ -67,6 +70,50 @@ const chrome = {
       setTimeout(() => cb && cb(true), 0);
     },
     onButtonClicked: { addListener: (fn) => { chrome.notifications._listener = fn; } },
+  },
+};
+
+// --- chrome.tabs: для openMaterialForLesson()/closeMaterialForLesson() ---
+// open-lesson ведёт себя как в run_background_unit.js (onUpdated "complete").
+// open-material отвечает тем, что задано в openMaterialResponse (меняется
+// по ходу теста) — если opened:true, вдобавок «создаём» новую вкладку
+// (onCreated), как это по-настоящему делает клик «Просмотреть».
+let tabUpdateListeners = [];
+let tabCreatedListeners = [];
+let removedTabIds = [];
+let openMaterialResponse = { ok: true, opened: false, reason: "no-material" };
+let skipTabCreation = false; // для проверки «вкладка не появилась»
+let nextCreatedTabId = 1000;
+
+chrome.tabs = {
+  sendMessage: (tabId, message, callback) => {
+    if (message.type === "open-lesson") {
+      setTimeout(() => tabUpdateListeners.forEach((fn) => fn(tabId, { status: "complete" })), 5);
+      setTimeout(() => callback({ ok: true }), 10);
+    } else if (message.type === "open-material") {
+      const resp = openMaterialResponse;
+      setTimeout(() => {
+        callback(resp);
+        if (resp.ok && resp.opened && !skipTabCreation) {
+          const newTabId = nextCreatedTabId++;
+          setTimeout(() => tabCreatedListeners.forEach((fn) => fn({ id: newTabId, openerTabId: tabId })), 5);
+        }
+      }, 10);
+    } else {
+      setTimeout(() => callback({ ok: true }), 10);
+    }
+  },
+  onUpdated: {
+    addListener: (fn) => tabUpdateListeners.push(fn),
+    removeListener: (fn) => { tabUpdateListeners = tabUpdateListeners.filter((l) => l !== fn); },
+  },
+  onCreated: {
+    addListener: (fn) => tabCreatedListeners.push(fn),
+    removeListener: (fn) => { tabCreatedListeners = tabCreatedListeners.filter((l) => l !== fn); },
+  },
+  remove: (tabId, cb) => {
+    removedTabIds.push(tabId);
+    setTimeout(() => cb && cb(), 0);
   },
 };
 
@@ -179,9 +226,42 @@ function timeOf(d) {
   checks.push(["arm при выключенном расширении — отказ", armWhileDisabled.ok === false && armWhileDisabled.reason === "extension-disabled"]);
   const manualWhileDisabled = await sendMsg({ type: "autopilot-manual-start", date: todayArr, lessons });
   checks.push(["manual-start при выключенном расширении — отказ", manualWhileDisabled.ok === false && manualWhileDisabled.reason === "extension-disabled"]);
+  const openMaterialWhileDisabled = await sendMsg({ type: "autopilot-open-material", tabId: 1, lessonId: 1 });
+  checks.push(["open-material при выключенном расширении — отказ", openMaterialWhileDisabled.ok === false && openMaterialWhileDisabled.reason === "extension-disabled"]);
+  const closeMaterialWhileDisabled = await sendMsg({ type: "autopilot-close-material", lessonId: 1 });
+  checks.push(["close-material при выключенном расширении — отказ", closeMaterialWhileDisabled.ok === false && closeMaterialWhileDisabled.reason === "extension-disabled"]);
   const statusWhileDisabled = await sendMsg({ type: "autopilot-status" });
   checks.push(["status при выключенном расширении всё равно отвечает", statusWhileDisabled.ok === true]);
   storage.enabled = true;
+
+  // --- Случай 9: открытие материала урока — материал есть, ровно один ---
+  const MESH_TAB_ID = 777;
+  openMaterialResponse = { ok: true, opened: true };
+  const openResp1 = await sendMsg({ type: "autopilot-open-material", tabId: MESH_TAB_ID, lessonId: 501 });
+  checks.push(["материал есть — open-material отвечает ok", openResp1 && openResp1.ok === true]);
+  checks.push(["материал есть — opened:true", openResp1 && openResp1.opened === true]);
+  checks.push(["материал есть — вернулся id новой вкладки", typeof openResp1.tabId === "number"]);
+
+  // --- Случай 10: у урока нет материала — пропускаем, это не ошибка ---
+  openMaterialResponse = { ok: true, opened: false, reason: "no-material" };
+  const openResp2 = await sendMsg({ type: "autopilot-open-material", tabId: MESH_TAB_ID, lessonId: 502 });
+  checks.push(["материала нет — ok:true, opened:false", openResp2 && openResp2.ok === true && openResp2.opened === false]);
+  checks.push(["материала нет — причина no-material", openResp2.reason === "no-material"]);
+
+  // --- Случай 11: у урока несколько материалов — тоже пропускаем ---
+  openMaterialResponse = { ok: true, opened: false, reason: "multiple-materials" };
+  const openResp3 = await sendMsg({ type: "autopilot-open-material", tabId: MESH_TAB_ID, lessonId: 503 });
+  checks.push(["материалов несколько — ok:true, opened:false", openResp3 && openResp3.ok === true && openResp3.opened === false]);
+  checks.push(["материалов несколько — причина multiple-materials", openResp3.reason === "multiple-materials"]);
+
+  // --- Случай 12: закрываем вкладку, открытую в случае 9 ---
+  const closeResp1 = await sendMsg({ type: "autopilot-close-material", lessonId: 501 });
+  checks.push(["закрытие открытой вкладки — closed:true", closeResp1 && closeResp1.ok === true && closeResp1.closed === true]);
+  checks.push(["закрытие вкладки — реально вызван chrome.tabs.remove с её id", removedTabIds.includes(openResp1.tabId)]);
+
+  // --- Случай 13: закрыть для урока, для которого вкладку не открывали ---
+  const closeResp2 = await sendMsg({ type: "autopilot-close-material", lessonId: 999 });
+  checks.push(["закрытие несуществующей вкладки — closed:false, не ошибка", closeResp2 && closeResp2.ok === true && closeResp2.closed === false]);
 
   let allOk = true;
   for (const [name, ok] of checks) {

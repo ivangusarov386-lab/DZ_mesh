@@ -1,0 +1,31 @@
+<!doctype html><html><body style="margin:0;font-family:sans-serif">
+<div id="page" style="padding:20px">
+  <h3>Материалы к уроку</h3>
+  <div id="materials"></div>
+</div>
+<script>
+const Q = new URLSearchParams(location.search);
+const COUNT = Number(Q.get("count") || "1");
+const container = document.getElementById("materials");
+for (let i = 0; i < COUNT; i++) {
+  const uuid = "uuid-" + i;
+  const card = document.createElement("div");
+  card.innerHTML =
+    '<span>Волейбол ' + i + '</span> ' +
+    '<button data-test-component="materialCardMenuList-' + uuid + '">&#8942;</button>' +
+    '<button data-test-component="materialCardDeleteUp-' + uuid + '">X</button>' +
+    '<div class="menu" style="display:none">' +
+      '<button class="view">Просмотреть</button>' +
+      '<button class="del">Удалить</button>' +
+    '</div>';
+  container.appendChild(card);
+  const menu = card.querySelector(".menu");
+  card.querySelector('[data-test-component^="materialCardMenuList-"]').onclick = () => {
+    menu.style.display = "block";
+  };
+  card.querySelector(".view").onclick = () => {
+    window.__viewedMaterial = uuid;
+  };
+}
+</script>
+</body></html>

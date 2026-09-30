@@ -33,6 +33,9 @@ const apManualToggle = document.getElementById("apManualToggle");
 const apStartBtn = document.getElementById("apStartBtn");
 const apStatusEl = document.getElementById("apStatus");
 const apCancelEl = document.getElementById("apCancel");
+const apOpenMaterialBtn = document.getElementById("apOpenMaterialBtn");
+const apCloseMaterialBtn = document.getElementById("apCloseMaterialBtn");
+const apMaterialStatusEl = document.getElementById("apMaterialStatus");
 
 // Выключатель вверху попапа: полностью гасит активность content.js на
 // странице МЭШ. Добавлен, потому что параллельно стоит ещё одно расширение
@@ -454,6 +457,64 @@ apCancelEl.addEventListener("click", async (e) => {
   e.preventDefault();
   await chrome.runtime.sendMessage({ type: "autopilot-cancel" }).catch(() => {});
   renderAutopilotStatus(null);
+});
+
+// Тест этапа 3 (открытие материала урока) — работает на первом отмеченном
+// галочкой уроке выбранного дня. apMaterialLessonId запоминает, у какого
+// урока сейчас (предположительно) открыта вкладка с материалом, чтобы
+// кнопка «Закрыть» знала, что закрывать — это состояние только в попапе,
+// переживает его закрытие не будет (это тестовая кнопка, не часть плана).
+let apMaterialLessonId = null;
+
+apOpenMaterialBtn.addEventListener("click", async () => {
+  const day = dayLessons();
+  const chosen = day.filter((l) => !excluded.has(l.id));
+  if (chosen.length === 0) {
+    apMaterialStatusEl.textContent = "Нет выбранных уроков — отметьте хотя бы один галочкой выше.";
+    return;
+  }
+  const lesson = chosen[0];
+  apOpenMaterialBtn.disabled = true;
+  apMaterialStatusEl.textContent = `Открываю урок «${lesson.group_name}»...`;
+  const resp = await chrome.runtime
+    .sendMessage({ type: "autopilot-open-material", tabId: activeTabId, lessonId: lesson.id })
+    .catch(() => null);
+  apOpenMaterialBtn.disabled = false;
+  if (!resp || !resp.ok) {
+    apMaterialStatusEl.textContent = "Не удалось: " + (resp ? resp.reason : "нет ответа от фона");
+    return;
+  }
+  if (!resp.opened) {
+    apMaterialStatusEl.textContent =
+      resp.reason === "no-material"
+        ? `У урока «${lesson.group_name}» нет прикреплённого материала — открывать нечего.`
+        : resp.reason === "multiple-materials"
+        ? `У урока «${lesson.group_name}» несколько материалов — пока не знаю, какой открыть, пропустил.`
+        : "Материал не открылся.";
+    return;
+  }
+  apMaterialLessonId = lesson.id;
+  apMaterialStatusEl.textContent = `✓ Материал урока «${lesson.group_name}» открыт в новой вкладке.`;
+});
+
+apCloseMaterialBtn.addEventListener("click", async () => {
+  if (apMaterialLessonId == null) {
+    apMaterialStatusEl.textContent = "Сначала нужно открыть материал — сейчас закрывать нечего.";
+    return;
+  }
+  apCloseMaterialBtn.disabled = true;
+  const resp = await chrome.runtime
+    .sendMessage({ type: "autopilot-close-material", lessonId: apMaterialLessonId })
+    .catch(() => null);
+  apCloseMaterialBtn.disabled = false;
+  if (!resp || !resp.ok) {
+    apMaterialStatusEl.textContent = "Не удалось закрыть: " + (resp ? resp.reason : "нет ответа от фона");
+    return;
+  }
+  apMaterialStatusEl.textContent = resp.closed
+    ? "✓ Вкладка с материалом закрыта."
+    : "Вкладка уже была закрыта (или не открывалась).";
+  apMaterialLessonId = null;
 });
 
 refreshAutopilotStatus();

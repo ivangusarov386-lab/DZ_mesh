@@ -12,18 +12,31 @@
 // - но для тестов важна возможность запустить процесс вручную, не дожидаясь
 //   будильника — попап даёт тумблер «Ручной / Авто» (см. popup.js).
 //
-// Этап 1 (этот файл, сейчас): «вооружить» день (дата + список уроков) —
-// либо по расписанию (будильник за CONFIRM_BEFORE_MIN минут до первого
-// урока → уведомление с кнопками «Да, начинаем» / «Отменить на сегодня»),
-// либо вручную из попапа (сразу подтверждён, без будильника и уведомления —
-// сам клик по кнопке в попапе и есть подтверждение). Дальше пока не идём:
-// открытие материала урока и закрытие вкладки нужно кодировать по реальному
-// DOM, а его мы ещё не видели (не подтверждено: открывает ли «Просмотреть»
-// НОВУЮ вкладку или меняет адрес в той же) — писать это вслепую нельзя, та
-// же дисциплина, что и с журналом. Как только это подтвердится — здесь же
-// появится планирование per-урочных будильников (открыть материал / закрыть
-// вкладку / проверить ДЗ) поверх уже готового подтверждения — и ручной, и
-// авто-режим будут доходить до неё одинаково, через plan.confirmed.
+// Этап 1: «вооружить» день (дата + список уроков) — либо по расписанию
+// (будильник за CONFIRM_BEFORE_MIN минут до первого урока → уведомление с
+// кнопками «Да, начинаем» / «Отменить на сегодня»), либо вручную из попапа
+// (сразу подтверждён, без будильника и уведомления — сам клик по кнопке в
+// попапе и есть подтверждение).
+//
+// Этап 3 (открытие материала урока — начато 30.09.2026): Иван подтвердил
+// через DevTools, что кнопка «...» у карточки материала помечена
+// data-test-component="materialCardMenuList-<uuid>" (см. content.js) и что
+// клик «Просмотреть» открывает НОВУЮ вкладку (не меняет адрес в текущей).
+// openMaterialForLesson()/closeMaterialForLesson() ниже реализуют именно
+// это — пока как отдельное, вызываемое вручную из попапа тестовое действие
+// («Открыть материал» / «Закрыть вкладку»), НЕ как часть автоматического
+// цикла по будильникам — те будильники (открыть материал ровно в начале
+// урока, закрыть ровно в конце) ещё не запланированы, это следующий шаг,
+// когда ручной тест подтвердит, что открытие/закрытие само по себе работает
+// надёжно на живом МЭШ.
+//
+// У этого файла намеренно СВОИ копии sleep/sendToTab/openLessonAndWaitLoad
+// (с префиксом ap*), а не переиспользование одноимённых функций из
+// background.js — хотя это один общий service worker (background.js грузит
+// этот файл через importScripts, поэтому технически мог бы звать чужие
+// функции по имени), но тогда autopilot.js перестал бы быть независимым и
+// самотестируемым файлом, как заявлено выше, и стал бы неявно ломаться при
+// правках background.js, которые его совершенно не касаются.
 
 const AUTOPILOT_ALARM = "autopilot-confirm";
 const AUTOPILOT_NOTIF = "autopilot-confirm-notif";
@@ -164,6 +177,98 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTOPILOT_ALARM) handleConfirmAlarm();
 });
 
+// --- Материал урока: открыть новую вкладку / закрыть её (см. комментарий
+// «Этап 3» наверху файла — пока вызывается вручную из попапа для теста) ---
+
+const materialTabs = {}; // lessonId -> id открытой вкладки с материалом (только в памяти, для теста)
+
+function apSleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function apSendToTab(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (resp) => {
+      if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+      else resolve(resp);
+    });
+  });
+}
+
+function apOpenLessonAndWaitLoad(tabId, lessonId) {
+  return new Promise((resolve) => {
+    const listener = (updatedTabId, info) => {
+      if (updatedTabId === tabId && info.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    apSendToTab(tabId, { type: "open-lesson", id: lessonId }).catch(() => {});
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 9000);
+  });
+}
+
+// Открывает страницу урока, нажимает «...» → «Просмотреть» на его материале
+// (content.js, open-material) и ловит появившуюся НОВУЮ вкладку по
+// openerTabId. Подтверждено Иваном 30.09.2026: открывается именно новая
+// вкладка на uchebnik.mos.ru, а не смена адреса в текущей. openerTabId не
+// требует разрешения "tabs" или хост-разрешения на uchebnik.mos.ru — в
+// отличие от url/title, это не «чувствительное» поле chrome.tabs.Tab.
+function openMaterialForLesson(meshTabId, lessonId) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const onCreated = (tab) => {
+      if (tab.openerTabId === meshTabId) finish({ ok: true, opened: true, tabId: tab.id });
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onCreated.removeListener(onCreated);
+      if (result.tabId != null) materialTabs[lessonId] = result.tabId;
+      resolve(result);
+    };
+    chrome.tabs.onCreated.addListener(onCreated);
+
+    apOpenLessonAndWaitLoad(meshTabId, lessonId)
+      .then(() => apSleep(1500)) // дать панели «Материалы к уроку» дорисоваться
+      .then(() => apSendToTab(meshTabId, { type: "open-material" }))
+      .then((resp) => {
+        if (!resp || !resp.ok) {
+          finish({ ok: false, reason: resp ? resp.reason : "нет ответа от страницы" });
+          return;
+        }
+        if (!resp.opened) {
+          // Материала нет или их несколько — это не ошибка, просто нечего открывать.
+          finish({ ok: true, opened: false, reason: resp.reason });
+          return;
+        }
+        // content.js нажал «Просмотреть» — ждём onCreated (таймаут на случай,
+        // если по какой-то причине вкладка так и не появится).
+        setTimeout(() => finish({ ok: false, reason: "новая вкладка не появилась за 5 секунд" }), 5000);
+      })
+      .catch(() => finish({ ok: false, reason: "message-failed" }));
+  });
+}
+
+function closeMaterialForLesson(lessonId) {
+  return new Promise((resolve) => {
+    const tabId = materialTabs[lessonId];
+    if (!tabId) {
+      resolve({ ok: true, closed: false, reason: "нет открытой вкладки для этого урока" });
+      return;
+    }
+    chrome.tabs.remove(tabId, () => {
+      void chrome.runtime.lastError; // вкладку могли уже закрыть вручную — не ошибка
+      delete materialTabs[lessonId];
+      resolve({ ok: true, closed: true });
+    });
+  });
+}
+
 chrome.notifications.onButtonClicked.addListener(async (notifId, btnIdx) => {
   if (notifId !== AUTOPILOT_NOTIF) return;
   chrome.notifications.clear(AUTOPILOT_NOTIF);
@@ -202,6 +307,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       manualStart(msg.date, msg.lessons).then((plan) => sendResponse({ ok: true, plan }));
     } else if (msg.type === "autopilot-cancel") {
       cancelPlan().then(() => sendResponse({ ok: true }));
+    } else if (msg.type === "autopilot-open-material") {
+      openMaterialForLesson(msg.tabId, msg.lessonId).then((r) => sendResponse(r));
+    } else if (msg.type === "autopilot-close-material") {
+      closeMaterialForLesson(msg.lessonId).then((r) => sendResponse(r));
     } else {
       sendResponse({ ok: false, reason: "unknown-type" });
     }

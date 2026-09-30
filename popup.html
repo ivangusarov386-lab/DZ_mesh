@@ -165,6 +165,29 @@
     color: #c62828;
     display: none;
   }
+  #autopilotBox .ap-subtitle {
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed #ddd;
+  }
+  #apOpenMaterialBtn, #apCloseMaterialBtn {
+    background: #eee;
+    color: #333;
+    width: 100%;
+    margin-top: 6px;
+  }
+  #apOpenMaterialBtn:disabled, #apCloseMaterialBtn:disabled {
+    color: #aaa;
+    cursor: default;
+  }
+  #apMaterialStatus {
+    font-size: 12px;
+    color: #666;
+    margin-top: 6px;
+    white-space: pre-line;
+  }
 </style>
 </head>
 <body>
@@ -199,6 +222,18 @@
     <button id="apStartBtn">Подтвердить план (тест)</button>
     <div id="apStatus"></div>
     <a href="#" id="apCancel">Отменить автопилот</a>
+
+    <div class="ap-subtitle">Тест: материал урока (этап 3)</div>
+    <div class="ap-note">
+      Работает на первом отмеченном галочкой уроке выше. «Открыть» — нажимает
+      «...» → «Просмотреть» на материале урока, точно как позже будет делать
+      автопилот в начале урока (если материала нет или их несколько —
+      честно напишет и ничего не нажмёт). Новая вкладка открывается на
+      экране по-настоящему — «Закрыть» её закроет.
+    </div>
+    <button id="apOpenMaterialBtn">Открыть материал (1-й отмеченный урок)</button>
+    <button id="apCloseMaterialBtn">Закрыть вкладку с материалом</button>
+    <div id="apMaterialStatus"></div>
   </div>
 
   <script src="popup.js"></script>
