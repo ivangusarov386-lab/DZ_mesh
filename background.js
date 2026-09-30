@@ -1,3 +1,10 @@
+// Автопилот по расписанию живёт в своём файле (autopilot.js) — свои
+// обработчики chrome.alarms/chrome.notifications/chrome.runtime.onMessage,
+// ничего здесь не трогает. Service worker может грузить только один файл
+// (manifest.json → background.service_worker), поэтому подключаем вторым
+// через importScripts. См. «Идеи на будущее» в CLAUDE.md.
+importScripts("autopilot.js");
+
 // Фоновый процесс (service worker) — работает независимо от всплывающего
 // окна. Popup может закрыться в любой момент (Chrome закрывает его при
 // потере фокуса, например если кликнуть по вкладке страницы) — раньше вся

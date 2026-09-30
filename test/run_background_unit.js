@@ -75,7 +75,10 @@ const chrome = {
   },
 };
 
-const sandbox = { chrome, console, setTimeout, clearTimeout, Promise, Date, Math, Set, Map };
+// background.js теперь грузит autopilot.js через importScripts() (реальный
+// глобал service worker'а, которого нет в vm-песочнице Node) — этому тесту
+// сам автопилот не нужен, достаточно заглушки, чтобы не упасть на загрузке.
+const sandbox = { chrome, console, setTimeout, clearTimeout, Promise, Date, Math, Set, Map, importScripts: () => {} };
 vm.createContext(sandbox);
 const src = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
 vm.runInContext(src, sandbox, { filename: "background.js" });
