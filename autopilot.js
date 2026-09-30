@@ -1,26 +1,29 @@
-// Автопилот по расписанию — отдельная функция, пока НЕ подключённая к
-// интерфейсу попапа (см. «Идеи на будущее» в CLAUDE.md). Свой файл, свои
-// обработчики chrome.runtime.onMessage/chrome.alarms/chrome.notifications —
+// Автопилот по расписанию (см. «Идеи на будущее» в CLAUDE.md). Свой файл,
+// свои обработчики chrome.runtime.onMessage/chrome.alarms/chrome.notifications —
 // ничего в background.js (state, runLoop) не трогает и не может на него
-// повлиять. Пока попап не начнёт слать сообщения "autopilot-*" (этого ещё
-// нет), весь этот файл просто ничего не делает.
+// повлиять.
 //
 // Решено Иваном 30.09.2026 (после трёх скриншотов реального МЭШ):
 // - отдельной кнопки «Начать урок»/«Завершить урок» в МЭШ нет;
 // - автопилот должен открывать материал урока в начале, закрывать вкладку
 //   в конце, и только потом проверять/ставить ДЗ как сейчас («полный цикл»);
 // - план, включённый накануне, НЕ должен запускаться сам по будильнику —
-//   нужен подтверждающий клик утром.
+//   нужен подтверждающий клик утром;
+// - но для тестов важна возможность запустить процесс вручную, не дожидаясь
+//   будильника — попап даёт тумблер «Ручной / Авто» (см. popup.js).
 //
-// Этап 1 (этот файл, сейчас): «вооружить» день (дата + список уроков) →
-// будильник за CONFIRM_BEFORE_MIN минут до первого урока → уведомление с
-// кнопками «Да, начинаем» / «Отменить на сегодня». Дальше пока не идём:
+// Этап 1 (этот файл, сейчас): «вооружить» день (дата + список уроков) —
+// либо по расписанию (будильник за CONFIRM_BEFORE_MIN минут до первого
+// урока → уведомление с кнопками «Да, начинаем» / «Отменить на сегодня»),
+// либо вручную из попапа (сразу подтверждён, без будильника и уведомления —
+// сам клик по кнопке в попапе и есть подтверждение). Дальше пока не идём:
 // открытие материала урока и закрытие вкладки нужно кодировать по реальному
 // DOM, а его мы ещё не видели (не подтверждено: открывает ли «Просмотреть»
 // НОВУЮ вкладку или меняет адрес в той же) — писать это вслепую нельзя, та
 // же дисциплина, что и с журналом. Как только это подтвердится — здесь же
 // появится планирование per-урочных будильников (открыть материал / закрыть
-// вкладку / проверить ДЗ) поверх уже готового подтверждения.
+// вкладку / проверить ДЗ) поверх уже готового подтверждения — и ручной, и
+// авто-режим будут доходить до неё одинаково, через plan.confirmed.
 
 const AUTOPILOT_ALARM = "autopilot-confirm";
 const AUTOPILOT_NOTIF = "autopilot-confirm-notif";
@@ -80,6 +83,28 @@ function armPlan(date, lessons) {
   });
 }
 
+// Ручной запуск из попапа (тумблер «Ручной») — для тестов и для дней, когда
+// Иван хочет запустить сам, не дожидаясь будильника. Сразу confirmed: true —
+// клик по кнопке в попапе это и есть подтверждение, отдельное уведомление
+// не нужно. Никакой будильник не ставится.
+function manualStart(date, lessons) {
+  const plan = {
+    dateKey: dateKeyOf(date),
+    date,
+    lessons,
+    confirmed: true,
+    manual: true,
+    armedAt: new Date().toISOString(),
+  };
+  return new Promise((resolve) => {
+    chrome.alarms.clear(AUTOPILOT_ALARM, () => {
+      chrome.notifications.clear(AUTOPILOT_NOTIF, () => {
+        chrome.storage.local.set({ autopilotPlan: plan }, () => resolve(plan));
+      });
+    });
+  });
+}
+
 function cancelPlan() {
   return new Promise((resolve) => {
     chrome.alarms.clear(AUTOPILOT_ALARM, () => {
@@ -90,7 +115,23 @@ function cancelPlan() {
   });
 }
 
+// Тот же выключатель, что наверху попапа («Расширение включено») — если
+// выключено, автопилот не должен ни показывать уведомление, ни принимать
+// новые команды из попапа. try/catch на случай недоступного storage — как
+// в content.js, лучше считать включённым, чем сломать всё на ровном месте.
+function isExtensionEnabled() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get({ enabled: true }, (data) => resolve(data.enabled !== false));
+    } catch (e) {
+      resolve(true);
+    }
+  });
+}
+
 async function handleConfirmAlarm() {
+  if (!(await isExtensionEnabled())) return; // расширение выключено целиком — как будто автопилота нет
+
   const plan = await getPlan();
   if (!plan || plan.confirmed) return; // нечего подтверждать
 
@@ -141,16 +182,29 @@ chrome.notifications.onButtonClicked.addListener(async (notifId, btnIdx) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "autopilot-arm") {
-    armPlan(msg.date, msg.lessons).then((plan) => sendResponse({ ok: true, plan }));
-    return true;
-  }
+  if (!msg || typeof msg.type !== "string" || !msg.type.startsWith("autopilot-")) return false;
+
+  // autopilot-status разрешаем и при выключенном расширении — попап должен
+  // суметь показать «план был, но расширение выключено», а не просто молчать.
   if (msg.type === "autopilot-status") {
     getPlan().then((plan) => sendResponse({ ok: true, plan }));
     return true;
   }
-  if (msg.type === "autopilot-cancel") {
-    cancelPlan().then(() => sendResponse({ ok: true }));
-    return true;
-  }
+
+  isExtensionEnabled().then((enabled) => {
+    if (!enabled) {
+      sendResponse({ ok: false, reason: "extension-disabled" });
+      return;
+    }
+    if (msg.type === "autopilot-arm") {
+      armPlan(msg.date, msg.lessons).then((plan) => sendResponse({ ok: true, plan }));
+    } else if (msg.type === "autopilot-manual-start") {
+      manualStart(msg.date, msg.lessons).then((plan) => sendResponse({ ok: true, plan }));
+    } else if (msg.type === "autopilot-cancel") {
+      cancelPlan().then(() => sendResponse({ ok: true }));
+    } else {
+      sendResponse({ ok: false, reason: "unknown-type" });
+    }
+  });
+  return true;
 });

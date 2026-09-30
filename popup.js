@@ -28,6 +28,11 @@ const loadBtn = document.getElementById("loadBtn");
 const selectAllEl = document.getElementById("selectAll");
 const enabledToggle = document.getElementById("enabledToggle");
 const disabledNotice = document.getElementById("disabledNotice");
+const autopilotBox = document.getElementById("autopilotBox");
+const apManualToggle = document.getElementById("apManualToggle");
+const apStartBtn = document.getElementById("apStartBtn");
+const apStatusEl = document.getElementById("apStatus");
+const apCancelEl = document.getElementById("apCancel");
 
 // Выключатель вверху попапа: полностью гасит активность content.js на
 // странице МЭШ. Добавлен, потому что параллельно стоит ещё одно расширение
@@ -57,6 +62,7 @@ function applyEnabledState() {
   } else if (selectedDate) {
     updateButtons();
   }
+  updateAutopilotVisibility();
 }
 
 function log(text, replace = false) {
@@ -276,6 +282,7 @@ selectAllEl.addEventListener("click", (e) => {
 });
 
 function updateButtons() {
+  updateAutopilotVisibility();
   if (!extensionEnabled) {
     runBtn.style.display = "none";
     stopBtn.style.display = "none";
@@ -371,3 +378,70 @@ function renderFromStatus(status) {
   else if (selectedDate) renderLessons();
   else updateButtons();
 }
+
+// ---------------------------------------------------------------------------
+// Автопилот (в разработке, см. «Идеи на будущее» в CLAUDE.md) — пока только
+// «вооружает» и подтверждает план (autopilot.js), сам ещё не открывает уроки.
+// Тумблер «Ручной»: сразу подтверждает (для тестов, не ждать будильник) —
+// «Авто»: обычный autopilot-arm, ждём реальный будильник/уведомление.
+// ---------------------------------------------------------------------------
+
+function updateAutopilotVisibility() {
+  autopilotBox.style.display = extensionEnabled && selectedDate ? "block" : "none";
+}
+
+function formatApDate(d) {
+  return `${String(d[2]).padStart(2, "0")}.${String(d[1]).padStart(2, "0")}`;
+}
+
+function renderAutopilotStatus(plan) {
+  if (!plan) {
+    apStatusEl.textContent = "";
+    apCancelEl.style.display = "none";
+    return;
+  }
+  const n = plan.lessons.length;
+  if (plan.confirmed) {
+    apStatusEl.textContent = `Подтверждён на ${formatApDate(plan.date)} — ${n} урок(ов).${
+      plan.manual ? " (ручной запуск)" : ""
+    } Дальше открытие уроков автопилот пока не делает — см. CLAUDE.md.`;
+  } else {
+    apStatusEl.textContent = `Вооружён на ${formatApDate(plan.date)} — ${n} урок(ов). Жду будильника (за 20 мин до первого урока) и подтверждения в уведомлении.`;
+  }
+  apCancelEl.style.display = "inline-block";
+}
+
+async function refreshAutopilotStatus() {
+  const resp = await chrome.runtime.sendMessage({ type: "autopilot-status" }).catch(() => null);
+  if (resp && resp.ok) renderAutopilotStatus(resp.plan);
+}
+
+apStartBtn.addEventListener("click", async () => {
+  const day = dayLessons();
+  const chosen = day.filter((l) => !excluded.has(l.id));
+  if (chosen.length === 0) {
+    apStatusEl.textContent = "Нет выбранных уроков — отметьте хотя бы один галочкой выше.";
+    return;
+  }
+  apStartBtn.disabled = true;
+  const manual = apManualToggle.checked;
+  const type = manual ? "autopilot-manual-start" : "autopilot-arm";
+  const resp = await chrome.runtime
+    .sendMessage({ type, date: selectedDate, lessons: chosen })
+    .catch(() => null);
+  apStartBtn.disabled = false;
+  if (!resp || !resp.ok) {
+    apStatusEl.textContent = "Не удалось: " + (resp ? resp.reason : "нет ответа от фона");
+    return;
+  }
+  renderAutopilotStatus(resp.plan);
+});
+
+apCancelEl.addEventListener("click", async (e) => {
+  e.preventDefault();
+  await chrome.runtime.sendMessage({ type: "autopilot-cancel" }).catch(() => {});
+  renderAutopilotStatus(null);
+});
+
+refreshAutopilotStatus();
+setInterval(refreshAutopilotStatus, 2000);

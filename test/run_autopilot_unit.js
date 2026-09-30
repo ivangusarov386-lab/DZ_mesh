@@ -25,9 +25,20 @@ const chrome = {
   },
   storage: {
     local: {
-      get: (keys, cb) => {
+      // Реальный chrome.storage.local.get принимает либо массив ключей
+      // (вернёт только то, что есть в storage), либо объект умолчаний
+      // (вернёт значение по умолчанию для отсутствующих ключей) — autopilot.js
+      // использует оба варианта (getPlan() — массив, isExtensionEnabled() —
+      // объект умолчаний), стаб должен понимать оба.
+      get: (keysOrDefaults, cb) => {
         const result = {};
-        keys.forEach((k) => { if (k in storage) result[k] = storage[k]; });
+        if (Array.isArray(keysOrDefaults)) {
+          keysOrDefaults.forEach((k) => { if (k in storage) result[k] = storage[k]; });
+        } else {
+          Object.keys(keysOrDefaults).forEach((k) => {
+            result[k] = k in storage ? storage[k] : keysOrDefaults[k];
+          });
+        }
         setTimeout(() => cb(result), 0);
       },
       set: (obj, cb) => {
@@ -151,6 +162,26 @@ function timeOf(d) {
   checks.push(["опоздавший будильник — уведомление НЕ показано", createdNotifications.length === 0]);
   const statusResp4 = await sendMsg({ type: "autopilot-status" });
   checks.push(["опоздавший план — снят как пропущенный", statusResp4.plan === null]);
+
+  // --- Случай 7: ручной запуск (тумблер «Ручной» в попапе) — сразу
+  // подтверждён, без будильника и уведомления ---
+  const manualResp = await sendMsg({ type: "autopilot-manual-start", date: todayArr, lessons });
+  checks.push(["autopilot-manual-start отвечает ok", manualResp && manualResp.ok === true]);
+  checks.push(["ручной план сразу confirmed:true", manualResp.plan && manualResp.plan.confirmed === true]);
+  checks.push(["ручной план помечен manual:true", manualResp.plan && manualResp.plan.manual === true]);
+  checks.push(["ручной запуск не ставит будильник", !alarms["autopilot-confirm"]]);
+  checks.push(["ручной запуск не показывает уведомление", createdNotifications.length === 0]);
+
+  // --- Случай 8: расширение выключено целиком — автопилот не принимает
+  // новые команды (но статус спросить можно) ---
+  storage.enabled = false;
+  const armWhileDisabled = await sendMsg({ type: "autopilot-arm", date: todayArr, lessons });
+  checks.push(["arm при выключенном расширении — отказ", armWhileDisabled.ok === false && armWhileDisabled.reason === "extension-disabled"]);
+  const manualWhileDisabled = await sendMsg({ type: "autopilot-manual-start", date: todayArr, lessons });
+  checks.push(["manual-start при выключенном расширении — отказ", manualWhileDisabled.ok === false && manualWhileDisabled.reason === "extension-disabled"]);
+  const statusWhileDisabled = await sendMsg({ type: "autopilot-status" });
+  checks.push(["status при выключенном расширении всё равно отвечает", statusWhileDisabled.ok === true]);
+  storage.enabled = true;
 
   let allOk = true;
   for (const [name, ok] of checks) {

@@ -130,6 +130,41 @@
     background: #ef9a9a;
     cursor: default;
   }
+  #autopilotBox {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+  }
+  #autopilotBox .ap-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  #autopilotBox .ap-note {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 8px;
+  }
+  #apStartBtn {
+    background: #5b3df5;
+    color: #fff;
+    width: 100%;
+  }
+  #apStartBtn:disabled {
+    background: #c9c3f7;
+    cursor: default;
+  }
+  #apStatus {
+    font-size: 12px;
+    color: #666;
+    margin-top: 6px;
+    white-space: pre-line;
+  }
+  #apCancel {
+    font-size: 12px;
+    color: #c62828;
+    display: none;
+  }
 </style>
 </head>
 <body>
@@ -148,6 +183,22 @@
   <button id="runBtn" style="display:none;">Проверить</button>
   <button id="stopBtn" style="display:none;">Стоп</button>
   <div id="status"></div>
+
+  <div id="autopilotBox" style="display:none;">
+    <div class="ap-title">Автопилот (в разработке)</div>
+    <div class="ap-note">
+      Пока только вооружает и подтверждает план для теста — сам ещё не
+      открывает уроки и не создаёт ДЗ. Работает для дня, выбранного выше.
+    </div>
+    <label class="toggle-row">
+      <input type="checkbox" id="apManualToggle" checked />
+      <span>Ручной запуск (не ждать будильник)</span>
+    </label>
+    <button id="apStartBtn">Начать автопилот сейчас</button>
+    <div id="apStatus"></div>
+    <a href="#" id="apCancel">Отменить автопилот</a>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
