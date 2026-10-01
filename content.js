@@ -137,9 +137,20 @@ function findMaterialMenuButtons() {
 // НОВУЮ вкладку (не меняет адрес в текущей) — эта функция только доводит
 // клик до конца на странице урока, саму новую вкладку ловит фон
 // (chrome.tabs.onCreated), это уже не забота content.js.
+//
+// Карточка «Материалы к уроку» заполняется на странице не сразу (отдельный
+// запрос после основной загрузки) — в отличие от этого, findMaterialMenuButtons()
+// раньше вызывался один раз мгновенно, без повтора, хотя весь остальной файл
+// в похожих местах (readJournalCells, кнопка «Просмотреть» ниже, submit формы)
+// именно поэтому ждёт появления элемента через waitForEl, а не проверяет один
+// раз. Баг Ивана 01.10.2026 («скрипт не находит кнопку «...»», «Открыть» ничего
+// не делает) — похоже, ровно это: в момент проверки карточка ещё не отрисовалась.
 async function openLessonMaterial() {
-  const buttons = findMaterialMenuButtons();
-  if (buttons.length === 0) {
+  const buttons = await waitForEl(() => {
+    const found = findMaterialMenuButtons();
+    return found.length > 0 ? found : null;
+  }, 6000);
+  if (!buttons) {
     step("материала к уроку нет — пропускаю открытие");
     return { ok: true, opened: false, reason: "no-material" };
   }
