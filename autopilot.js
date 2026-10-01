@@ -271,7 +271,9 @@ function openMaterialForLesson(meshTabId, lessonId) {
         }
         if (!resp.opened) {
           // Материала нет или их несколько — это не ошибка, просто нечего открывать.
-          finish({ ok: true, opened: false, reason: resp.reason });
+          // rawFound (только для reason:"no-material") — диагностика для бага
+          // 01.10.2026, см. комментарий у openLessonMaterial() в content.js.
+          finish({ ok: true, opened: false, reason: resp.reason, rawFound: resp.rawFound });
           return;
         }
         // content.js нажал «Просмотреть» — ждём onCreated (таймаут на случай,

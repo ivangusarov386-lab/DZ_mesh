@@ -502,7 +502,7 @@ apOpenMaterialBtn.addEventListener("click", async () => {
   if (!resp.opened) {
     apMaterialStatusEl.textContent =
       resp.reason === "no-material"
-        ? `У урока «${lesson.group_name}» нет прикреплённого материала — открывать нечего.`
+        ? `У урока «${lesson.group_name}» нет прикреплённого материала — открывать нечего. (диагностика: таких кнопок в коде страницы — ${resp.rawFound ?? "?"})`
         : resp.reason === "multiple-materials"
         ? `У урока «${lesson.group_name}» несколько материалов — пока не знаю, какой открыть, пропустил.`
         : "Материал не открылся.";

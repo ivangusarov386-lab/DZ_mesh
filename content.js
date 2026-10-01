@@ -151,8 +151,14 @@ async function openLessonMaterial() {
     return found.length > 0 ? found : null;
   }, 6000);
   if (!buttons) {
-    step("материала к уроку нет — пропускаю открытие");
-    return { ok: true, opened: false, reason: "no-material" };
+    // Диагностика для бага 01.10.2026 («скрипт не находит кнопку», хотя
+    // Иван видит материал на экране, и атрибут по DevTools верный): считаем
+    // такие кнопки в DOM БЕЗ фильтра isVisible, чтобы по следующему прогону
+    // было видно — их там вообще нет (не успели отрисоваться / правда нет)
+    // или они есть, но isVisible() их почему-то бракует.
+    const raw = document.querySelectorAll('[data-test-component^="materialCardMenuList-"]').length;
+    step(`материала к уроку нет — пропускаю открытие (таких кнопок в коде страницы: ${raw})`);
+    return { ok: true, opened: false, reason: "no-material", rawFound: raw };
   }
   if (buttons.length > 1) {
     // Бывает редко (со слов Ивана) — на всякий случай не гадаем, какой
