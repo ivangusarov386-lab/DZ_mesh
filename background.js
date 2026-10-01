@@ -31,6 +31,35 @@ let state = {
   aeCount: 0,      // доп. образование за неделю (только счётчик)
 };
 
+// Chrome выгружает service worker из памяти примерно после 30с бездействия
+// (обычное поведение MV3, не баг) — тогда `state` пересоздаётся с нуля,
+// как при первом запуске. Для данных недели это та же потеря, что раньше
+// чинили для случая «попап закрылся в момент загрузки» — только тут и
+// переоткрытие попапа не поможет, нужные данные пропадают независимо от
+// него. Дублируем в chrome.storage.local (as у enabled-переключателя) и
+// восстанавливаем при каждом старте этого файла.
+try {
+  chrome.storage.local.get(["weekLessons", "ecCount", "aeCount"], (data) => {
+    if (data.weekLessons) state.weekLessons = data.weekLessons;
+    if (data.ecCount) state.ecCount = data.ecCount;
+    if (data.aeCount) state.aeCount = data.aeCount;
+  });
+} catch (e) {
+  /* нет storage — остаёмся с пустыми значениями по умолчанию, как раньше */
+}
+
+function saveWeekData() {
+  try {
+    chrome.storage.local.set({
+      weekLessons: state.weekLessons,
+      ecCount: state.ecCount,
+      aeCount: state.aeCount,
+    });
+  } catch (e) {
+    /* нет storage — не страшно, просто не переживёт перезапуск SW */
+  }
+}
+
 function pushLog(line) {
   state.log.push(line);
   if (state.log.length > 400) state.log.shift();
@@ -53,14 +82,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     state.weekLessons = (msg.data || []).filter(
       (l) => l && l.id != null && l.group_id != null && l.class_unit_id != null
     );
+    saveWeekData();
     return false;
   }
   if (msg.type === "ec_schedule_items") {
     state.ecCount = (msg.data || []).length;
+    saveWeekData();
     return false;
   }
   if (msg.type === "ae_schedule_items") {
     state.aeCount = (msg.data || []).length;
+    saveWeekData();
     return false;
   }
 
@@ -126,6 +158,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       state.weekLessons = [];
       state.ecCount = 0;
       state.aeCount = 0;
+      saveWeekData();
     }
     sendResponse({ ok: true });
     return true;

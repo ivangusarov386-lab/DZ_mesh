@@ -60,7 +60,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!extensionEnabled) return false;
 
   if (msg.type === "reload-schedule") {
-    if (location.href.startsWith("https://school.mos.ru/teacher/account/schedule")) {
+    // «Уже на странице расписания» годится для reload() только если это
+    // САМА сетка недели — без query-строки. `open-lesson` ставит адрес
+    // .../teacher/account/schedule?scheduleItemId=<id>, а он тоже
+    // startsWith("...schedule") (это просто тот же префикс + параметр!),
+    // так что старая проверка срабатывала и на странице ОДНОГО урока —
+    // reload() там просто перезагружал тот же урок, а не сетку недели, и
+    // schedule_items вообще не перезапрашивался. Баг Ивана 01.10.2026:
+    // «Загружено уроков за неделю: 0» после «Загрузить» со страницы урока
+    // (например, сразу после теста «Открыть материал»).
+    const u = new URL(location.href);
+    const onScheduleGrid = u.pathname === "/teacher/account/schedule" && !u.search;
+    if (onScheduleGrid) {
       location.reload();
     } else {
       location.href = "https://school.mos.ru/teacher/account/schedule";

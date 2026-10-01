@@ -180,7 +180,32 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // --- Материал урока: открыть новую вкладку / закрыть её (см. комментарий
 // «Этап 3» наверху файла — пока вызывается вручную из попапа для теста) ---
 
-const materialTabs = {}; // lessonId -> id открытой вкладки с материалом (только в памяти, для теста)
+const materialTabs = {}; // lessonId -> id открытой вкладки с материалом
+
+// Chrome может выгрузить service worker из памяти (~30с бездействия,
+// обычное поведение MV3) между «Открыть материал» и «Закрыть» — тогда
+// materialTabs, обычный объект в памяти, обнулился бы, и «Закрыть» честно
+// сказал бы «нечего закрывать», хотя вкладка всё ещё реально открыта.
+// Живой баг 01.10.2026: Иван открыл материал, кнопка «Закрыть» ничего не
+// нашла — это уже ВТОРАЯ причина того же класса (первая была в
+// popup.js — см. CLAUDE.md), раз исправили одну, стоило сразу закрыть и
+// эту. Храним в chrome.storage.local (тот же приём, что у данных недели
+// в background.js) и восстанавливаем при каждом старте этого файла.
+try {
+  chrome.storage.local.get(["materialTabs"], (data) => {
+    if (data.materialTabs) Object.assign(materialTabs, data.materialTabs);
+  });
+} catch (e) {
+  /* нет storage — остаёмся с пустым materialTabs, как и раньше */
+}
+
+function saveMaterialTabs() {
+  try {
+    chrome.storage.local.set({ materialTabs });
+  } catch (e) {
+    /* нет storage — не страшно, просто не переживёт перезапуск SW */
+  }
+}
 
 function apSleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -228,7 +253,10 @@ function openMaterialForLesson(meshTabId, lessonId) {
       if (settled) return;
       settled = true;
       chrome.tabs.onCreated.removeListener(onCreated);
-      if (result.tabId != null) materialTabs[lessonId] = result.tabId;
+      if (result.tabId != null) {
+        materialTabs[lessonId] = result.tabId;
+        saveMaterialTabs();
+      }
       resolve(result);
     };
     chrome.tabs.onCreated.addListener(onCreated);
@@ -264,6 +292,7 @@ function closeMaterialForLesson(lessonId) {
     chrome.tabs.remove(tabId, () => {
       void chrome.runtime.lastError; // вкладку могли уже закрыть вручную — не ошибка
       delete materialTabs[lessonId];
+      saveMaterialTabs();
       resolve({ ok: true, closed: true });
     });
   });
