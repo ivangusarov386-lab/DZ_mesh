@@ -316,6 +316,99 @@ function closeAllMaterialTabs() {
   }));
 }
 
+// --- Сценарий урока («начать урок») — найдено и проверено руками на живом
+// МЭШ 04.10.2026 вместе с Иваном через Claude in Chrome, см. AUTOPILOT.md в
+// корне репозитория. Пока вызывается вручную из попапа для теста (как и
+// материал выше) — будильники «открыть сценарий ровно в начале урока,
+// закрыть ровно в конце» ещё не запланированы, это следующий шаг (см.
+// AUTOPILOT.md, раздел 6, пункт 4), после того как ручной тест подтвердит
+// шаги B и C на живом МЭШ по одному.
+
+const scenarioTabs = {}; // lessonId -> id вкладки с запущенным сценарием
+
+// Та же защита от выгрузки service worker'а, что и у materialTabs выше.
+try {
+  chrome.storage.local.get(["scenarioTabs"], (data) => {
+    if (data.scenarioTabs) Object.assign(scenarioTabs, data.scenarioTabs);
+  });
+} catch (e) {
+  /* нет storage — остаёмся с пустым scenarioTabs, как и раньше */
+}
+
+function saveScenarioTabs() {
+  try {
+    chrome.storage.local.set({ scenarioTabs });
+  } catch (e) {
+    /* нет storage — не страшно, просто не переживёт перезапуск SW */
+  }
+}
+
+// Открывает урок, получает у content.js ссылку «Запустить» (get-scenario-link)
+// и сам открывает вкладку через chrome.tabs.create — по требованию Ивана
+// (сценарий может идти на проекторе) с active:false, чтобы не перехватывать
+// фокус и не мешать тому, что сейчас показано на экране/проекторе.
+function launchScenarioForLesson(meshTabId, lessonId, index = 0) {
+  return apOpenLessonAndWaitLoad(meshTabId, lessonId)
+    .then(() => apSleep(1500)) // дать странице урока начать рендериться
+    .then(() => apSendToTab(meshTabId, { type: "get-scenario-link", index }))
+    .then((resp) => {
+      if (!resp || !resp.ok) {
+        return { ok: false, reason: resp ? resp.reason : "нет ответа от страницы" };
+      }
+      return new Promise((resolve) => {
+        chrome.tabs.create({ url: resp.href, active: false }, (tab) => {
+          scenarioTabs[lessonId] = tab.id;
+          saveScenarioTabs();
+          resolve({ ok: true, title: resp.title, tabId: tab.id });
+        });
+      });
+    })
+    .catch(() => ({ ok: false, reason: "message-failed" }));
+}
+
+// Закрытие — только если вкладка всё ещё похожа на сценарий (адрес
+// начинается с uchebnik.mos.ru/composer3/lesson/), как явно просил
+// AUTOPILOT.md («не закрыть чужую вкладку», если пользователь, например,
+// сам перешёл в этой вкладке куда-то ещё).
+function closeScenarioForLesson(lessonId) {
+  return new Promise((resolve) => {
+    const tabId = scenarioTabs[lessonId];
+    if (!tabId) {
+      resolve({ ok: true, closed: false, reason: "нет открытой вкладки для этого урока" });
+      return;
+    }
+    chrome.tabs.get(tabId, (tab) => {
+      void chrome.runtime.lastError; // вкладку могли уже закрыть вручную — не ошибка
+      const looksLikeScenario = tab && (tab.url || "").startsWith("https://uchebnik.mos.ru/composer3/lesson/");
+      delete scenarioTabs[lessonId];
+      saveScenarioTabs();
+      if (!tab) {
+        resolve({ ok: true, closed: false, reason: "вкладка уже закрыта" });
+        return;
+      }
+      if (!looksLikeScenario) {
+        resolve({ ok: false, reason: "tab-url-changed", url: tab.url });
+        return;
+      }
+      chrome.tabs.remove(tabId, () => {
+        void chrome.runtime.lastError;
+        resolve({ ok: true, closed: true });
+      });
+    });
+  });
+}
+
+// Та же логика, что у closeAllMaterialTabs — попап не помнит, для какого
+// урока открывал, поэтому «Закрыть» закрывает все сейчас отслеживаемые.
+function closeAllScenarioTabs() {
+  const lessonIds = Object.keys(scenarioTabs);
+  if (lessonIds.length === 0) return Promise.resolve({ ok: true, closedCount: 0 });
+  return Promise.all(lessonIds.map((id) => closeScenarioForLesson(id))).then((results) => ({
+    ok: true,
+    closedCount: results.filter((r) => r.closed).length,
+  }));
+}
+
 chrome.notifications.onButtonClicked.addListener(async (notifId, btnIdx) => {
   if (notifId !== AUTOPILOT_NOTIF) return;
   chrome.notifications.clear(AUTOPILOT_NOTIF);
@@ -360,6 +453,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // lessonId не передан из попапа (см. комментарий у closeAllMaterialTabs) —
       // но поддерживаем и точечное закрытие по id, если он всё же есть.
       const closer = msg.lessonId != null ? closeMaterialForLesson(msg.lessonId) : closeAllMaterialTabs();
+      closer.then((r) => sendResponse(r));
+    } else if (msg.type === "autopilot-launch-scenario") {
+      launchScenarioForLesson(msg.tabId, msg.lessonId, msg.index || 0).then((r) => sendResponse(r));
+    } else if (msg.type === "autopilot-close-scenario") {
+      const closer = msg.lessonId != null ? closeScenarioForLesson(msg.lessonId) : closeAllScenarioTabs();
       closer.then((r) => sendResponse(r));
     } else {
       sendResponse({ ok: false, reason: "unknown-type" });

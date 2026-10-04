@@ -36,6 +36,9 @@ const apCancelEl = document.getElementById("apCancel");
 const apOpenMaterialBtn = document.getElementById("apOpenMaterialBtn");
 const apCloseMaterialBtn = document.getElementById("apCloseMaterialBtn");
 const apMaterialStatusEl = document.getElementById("apMaterialStatus");
+const apLaunchScenarioBtn = document.getElementById("apLaunchScenarioBtn");
+const apCloseScenarioBtn = document.getElementById("apCloseScenarioBtn");
+const apScenarioStatusEl = document.getElementById("apScenarioStatus");
 
 // Выключатель вверху попапа: полностью гасит активность content.js на
 // странице МЭШ. Добавлен, потому что параллельно стоит ещё одно расширение
@@ -529,6 +532,48 @@ apCloseMaterialBtn.addEventListener("click", async () => {
     resp.closedCount > 0
       ? `✓ Закрыто вкладок: ${resp.closedCount}.`
       : "Открытых вкладок с материалом сейчас нет.";
+});
+
+// Тест сценария урока («начать урок») — см. AUTOPILOT.md. Та же схема, что
+// и у материала выше: берёт первый отмеченный галочкой урок, не помнит id
+// урока между «Запустить» и «Закрыть» (см. комментарий у apCloseMaterialBtn).
+apLaunchScenarioBtn.addEventListener("click", async () => {
+  const day = dayLessons();
+  const chosen = day.filter((l) => !excluded.has(l.id));
+  if (chosen.length === 0) {
+    apScenarioStatusEl.textContent = "Нет выбранных уроков — отметьте хотя бы один галочкой выше.";
+    return;
+  }
+  const lesson = chosen[0];
+  apLaunchScenarioBtn.disabled = true;
+  apScenarioStatusEl.textContent = `Открываю урок «${lesson.group_name}»...`;
+  const resp = await chrome.runtime
+    .sendMessage({ type: "autopilot-launch-scenario", tabId: activeTabId, lessonId: lesson.id })
+    .catch(() => null);
+  apLaunchScenarioBtn.disabled = false;
+  if (!resp || !resp.ok) {
+    apScenarioStatusEl.textContent =
+      resp && resp.reason === "no-scenario"
+        ? `У урока «${lesson.group_name}» нет сценария в «Материалах к уроку» — запускать нечего.`
+        : "Не удалось: " + (resp ? resp.reason : "нет ответа от фона");
+    return;
+  }
+  apScenarioStatusEl.textContent = `✓ Сценарий «${resp.title}» запущен в новой вкладке (в фоне).`;
+});
+
+apCloseScenarioBtn.addEventListener("click", async () => {
+  apCloseScenarioBtn.disabled = true;
+  apScenarioStatusEl.textContent = "Закрываю...";
+  const resp = await chrome.runtime.sendMessage({ type: "autopilot-close-scenario" }).catch(() => null);
+  apCloseScenarioBtn.disabled = false;
+  if (!resp || !resp.ok) {
+    apScenarioStatusEl.textContent = "Не удалось закрыть: " + (resp ? resp.reason : "нет ответа от фона");
+    return;
+  }
+  apScenarioStatusEl.textContent =
+    resp.closedCount > 0
+      ? `✓ Закрыто вкладок: ${resp.closedCount}.`
+      : "Открытых вкладок со сценарием сейчас нет.";
 });
 
 refreshAutopilotStatus();

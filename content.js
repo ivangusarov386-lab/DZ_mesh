@@ -117,6 +117,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, reason: "ошибка скрипта: " + (e && e.message), debug: snapshot() }));
     return true; // ответ будет отправлен асинхронно
   }
+
+  if (msg.type === "get-scenario-link") {
+    getScenarioLaunchLink(msg.index || 0)
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, reason: "ошибка скрипта: " + (e && e.message), debug: snapshot() }));
+    return true; // ответ будет отправлен асинхронно
+  }
 });
 
 // Кнопка «...» у карточки материала урока (панель «Материалы к уроку») —
@@ -187,6 +194,87 @@ async function openLessonMaterial() {
   return { ok: true, opened: true };
 }
 
+// ---------------------------------------------------------------------------
+// Запуск сценария урока (автопилот, этап «начать урок» — найдено и
+// проверено руками на живом МЭШ 04.10.2026, см. AUTOPILOT.md в корне
+// репозитория). «Начать урок» в МЭШ — это запустить сценарий урока из
+// того же блока «Материалы к уроку», что и обычные материалы выше: та же
+// кнопка «...» (тот же атрибут materialCardMenuList-<uuid>, подтверждено
+// дважды через DevTools — для видео и для сценария), но в открывшемся меню
+// нужен пункт «Запустить» (обычная ссылка target="_blank"), а не
+// «Просмотреть». Открывается НОВАЯ вкладка на uchebnik.mos.ru. По просьбе
+// Ивана (сценарий может идти на проекторе) эту вкладку должен открывать
+// background.js через chrome.tabs.create с active:false — поэтому здесь
+// мы только ВОЗВРАЩАЕМ ссылку «Запустить», не кликая по ней напрямую.
+// ---------------------------------------------------------------------------
+
+const SCENARIO_LABEL = "Сценарий урока";
+const LAUNCH_ITEM = "Запустить";
+
+// Карточки материалов с подписью «Сценарий урока» — самый глубокий такой
+// блок (чтобы не задвоить внешний контейнер и вложенную карточку), с хотя бы
+// одной кнопкой внутри. Бывают и другие типы материалов (например,
+// «Видеоурок») — их эта функция не находит и не трогает.
+function findScenarioCards() {
+  const all = Array.from(document.querySelectorAll("div")).filter(
+    (e) => isVisible(e) && norm(e.textContent).endsWith(SCENARIO_LABEL) && e.querySelectorAll("button").length >= 1
+  );
+  return all.filter((e) => !all.some((o) => o !== e && e.contains(o)));
+}
+
+// index — какой по счёту сценарий запускать (0 = первый). Если сценариев
+// несколько — какой из них правильно запускать, ещё не решено (открытый
+// вопрос к Ивану, см. AUTOPILOT.md), пока всегда берём первый по умолчанию.
+async function getScenarioLaunchLink(index = 0) {
+  const ready = await waitFor(() => hasText("Материалы к уроку"), 30000);
+  if (!ready) return fail("timeout", "блок «Материалы к уроку» не загрузился");
+  await sleep(1500); // даём списку материалов дорисоваться
+
+  const cards = findScenarioCards();
+  if (cards.length === 0) return fail("no-scenario", "у урока нет сценария в «Материалах к уроку»");
+  if (index >= cards.length) return fail("no-scenario", `сценария №${index + 1} нет (всего ${cards.length})`);
+
+  const card = cards[index];
+  const title = norm(card.textContent).slice(0, -SCENARIO_LABEL.length).trim();
+  // Та же кнопка «...», что и у findMaterialMenuButtons() выше — найденная
+  // ВНУТРИ конкретной карточки сценария, чтобы открыть меню именно его, а не
+  // первого материала на странице.
+  const menuBtn = card.querySelector('[data-test-component^="materialCardMenuList-"]');
+  if (!menuBtn || !isVisible(menuBtn) || isDisabled(menuBtn) || !isOnTop(menuBtn)) {
+    return fail("no-menu-button", "не нашёл кнопку «...» у сценария");
+  }
+
+  await think();
+  step(`открываю меню «...» у сценария «${title}»`);
+  await humanClick(menuBtn);
+
+  const menu = await waitForEl(findMaterialActionsMenu, 5000);
+  if (!menu) return fail("no-menu", "меню «Действия с материалом» не открылось");
+
+  // Только ссылка с ТОЧНЫМ текстом «Запустить» — рядом в том же меню есть
+  // «Удалить» (убирает материал из урока), её не трогаем вообще.
+  const link = Array.from(menu.querySelectorAll("a")).find((a) => norm(a.textContent) === LAUNCH_ITEM);
+  if (!link || !link.href) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return fail("no-launch-item", "в меню нет пункта «Запустить»");
+  }
+
+  const href = link.href;
+  step("нашёл «Запустить», передаю ссылку для открытия вкладки");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  hideCursorLater();
+  return { ok: true, href, title, total: cards.length };
+}
+
+function findMaterialActionsMenu() {
+  return (
+    Array.from(document.querySelectorAll('[role="tooltip"]')).find(
+      (m) => isVisible(m) && norm(m.textContent).startsWith("Действия с материалом")
+    ) || null
+  );
+}
+
 // Каждая клетка урока в журнале класса помечена в коде страницы атрибутом
 // вида data-test-component="scheduleLessonCell-<id>-<СТАТУС>", где <id> —
 // тот же номер, что в ссылке на урок (?scheduleItemId=<id>), а <СТАТУС> —
@@ -238,12 +326,10 @@ async function createHomework(text, lessonDate) {
   trace = [];
   currentLessonNum = lessonDate ? lessonDate[0] * 10000 + lessonDate[1] * 100 + lessonDate[2] : null;
 
-  // 1. Ждём, пока правая панель урока реально дорисуется.
-  // Если ДЗ на уроке уже выдано, панель показывает карточку задания с
-  // «Проверить к: ДД.ММ.ГГГГ» и «Для учеников: N из M», а текста
-  // «Домашнее задание отсутствует» нет. Внимание: кнопка «Создать домашнее
-  // задание» есть В ОБОИХ случаях (можно добавить второе задание), поэтому
-  // по ней решать нельзя — только по тексту «отсутствует».
+  // 1. Ждём, пока правая панель урока реально дорисуется. Страница урока
+  // грузится медленно — спиннер крутится до ~20 секунд (замечено 04.10.2026
+  // на живом МЭШ, см. AUTOPILOT.md) — поэтому ждём не меньше 30 секунд
+  // (было 12, этого иногда не хватало).
   const panel = await waitFor(
     () =>
       hasText("Домашнее задание отсутствует") ||
@@ -251,34 +337,41 @@ async function createHomework(text, lessonDate) {
       hasText("Для учеников") ||
       hasText("Задание №") ||
       hasText("Домашнее задание создано"),
-    12000
+    30000
   );
   if (!panel) return fail("timeout", "панель «Домашнее задание» не загрузилась");
   if (!hasText("Домашнее задание отсутствует")) {
-    // Решение «ДЗ уже есть» важно не принять поспешно: даём панели ещё
-    // немного дорисоваться.
-    await sleep(1500);
-    if (!hasText("Домашнее задание отсутствует")) {
-      // На странице урока показываются и задания, которые на этот урок
-      // нужно СДАТЬ (выданы раньше, «Проверить к» = дата урока или раньше).
-      // Выданным НА этом уроке считается только задание, которое надо
-      // проверить ПОЗЖЕ даты урока.
-      const due = dueDates();
-      const shown = due.map(fmtDateNum).join(", ");
-      if (currentLessonNum == null) {
-        step(`ДЗ на этом уроке уже выдано (проверить к ${shown || "?"})`);
-        return { ok: true, created: false, reason: "already-exists" };
-      }
-      const later = due.filter((d) => d > currentLessonNum);
-      if (later.length) {
-        step(`ДЗ на этом уроке уже выдано (проверить к ${later.map(fmtDateNum).join(", ")})`);
-        return { ok: true, created: false, reason: "already-exists" };
-      }
-      step(
-        `на уроке только ДЗ к сдаче (проверить к ${shown || "?"}) — ` +
-          `выданного на этом уроке нет, создаю`
+    // ГЛАВНЫЙ ФИКС 04.10.2026 (см. AUTOPILOT.md, раздел 3 — «дубли
+    // «Не задано.»»). Эта панель показывает ТОЛЬКО задания, которые нужно
+    // СДАТЬ на этом уроке (выданы раньше, «Проверить к» = дата урока или
+    // раньше) — задание, выданное ИМЕННО на этом уроке, в ней не
+    // появляется ВООБЩЕ. Оно видно только в правой колонке СЛЕДУЮЩЕГО
+    // урока этого класса, в разделе «дом. задание» («Задано» + «Проверить
+    // к: <дата>»). Старое правило (искать «Проверить к» по всей странице и
+    // сравнивать с датой урока, v5.1) иногда случайно совпадало с этим —
+    // колонка попадает в тот же document.body.innerText — но она
+    // ЗАГРУЖАЕТСЯ ПОЗЖЕ основной панели, и решение «нет более поздней
+    // даты» до того, как она прогрузилась, означало дубль. Так и
+    // случилось вживую: расширение трижды прошло один и тот же урок и
+    // трижды создало «Не задано.», потому что колонка ни разу не успела
+    // появиться за старое время ожидания. Теперь решение принимается
+    // только по этой колонке и только когда она точно загрузилась; дубль
+    // хуже пропуска, поэтому при таймауте — НЕ создаём.
+    const outcome = await waitForEl(() => nextLessonHomeworkStatus(), 30000);
+    if (!outcome) {
+      return fail(
+        "next-lesson-column-timeout",
+        "не дождался раздела «дом. задание» у следующего урока за 30 секунд — не создаю, чтобы не задвоить"
       );
     }
+    if (outcome.assigned) {
+      step(
+        `ДЗ на этом уроке уже выдано (в разделе «дом. задание» следующего урока: ` +
+          `проверить к ${outcome.dates.map(fmtDateNum).join(", ")})`
+      );
+      return { ok: true, created: false, reason: "already-exists" };
+    }
+    step("в разделе «дом. задание» следующего урока ДЗ не значится — создаю");
   }
 
   // 2. Идём по экранам, пока не появится поле описания.
@@ -338,6 +431,36 @@ function fmtDateNum(n) {
 }
 
 let currentLessonNum = null; // дата текущего урока как 20260928
+
+// Правая колонка СЛЕДУЮЩЕГО урока этого класса — единственный надёжный
+// признак «ДЗ выдано ИМЕННО на этом уроке» (найдено 04.10.2026 на живом
+// МЭШ, см. AUTOPILOT.md, раздел 3). Пример текста с реального урока
+// (9-Я, следующий урок 12.10):
+//   дом. задание  Задано  Домашнее задание  Не задано.
+//   Задано:  04.10.2026 в 22:37  Проверить к:  12.10.2026
+// «Задано» здесь — статус раздела, с заглавной «З»; текст самого задания
+// «Не задано.» — со строчной, так что спутать их регулярным выражением
+// нельзя. Возвращает null, пока раздел «дом. задание» не появился на
+// странице (значит, календарь справа ещё не дорисовался — надо ждать
+// дальше), иначе {assigned, dates}. Как выглядит раздел, когда ДЗ НЕ
+// выдано, и что в нём, если у класса нет следующего урока (конец
+// четверти) — не видели ни разу (см. CLAUDE.md, «Не проверено на живом
+// МЭШ»). Поэтому «не выдано» решаем только когда раздел точно загрузился
+// и в нём нет ни «Задано», ни более поздней даты — никогда раньше и
+// никогда «на глазок»; если раздел так и не появился, это тоже не решаем
+// как «не выдано» — целиком дело вызывающего кода (там таймаут = отказ).
+function nextLessonHomeworkStatus() {
+  const text = document.body ? document.body.innerText : "";
+  const idx = text.indexOf("дом. задание");
+  if (idx === -1) return null;
+  const section = text.slice(idx, idx + 400);
+  const re = /Проверить к:?\s*(\d{2})\.(\d{2})\.(\d{4})/g;
+  const dates = [];
+  let m;
+  while ((m = re.exec(section))) dates.push(+m[3] * 10000 + +m[2] * 100 + +m[1]);
+  const laterDates = currentLessonNum == null ? dates : dates.filter((d) => d > currentLessonNum);
+  return { assigned: /Задано/.test(section) && laterDates.length > 0, dates: laterDates };
+}
 
 function isSuccess() {
   if (hasText("Домашнее задание создано")) return true;

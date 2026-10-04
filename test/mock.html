@@ -10,6 +10,7 @@
     </div>
   </div>
 </div>
+<div id="nextLessonCol"></div>
 <script>
 const Q=new URLSearchParams(location.search); const MODE = Q.get("mode") || "ktp";
 if(Q.get("due")) document.getElementById("cards").innerHTML='<div><b>Задание 1</b> Не задано.<div>Когда задано: 21.09.2026 в 21:39</div><div>Проверить к: '+Q.get("due")+'</div><div>Для учеников: 29 из 29</div></div>';
@@ -26,4 +27,22 @@ document.getElementById('create').onclick=()=>{setTimeout(()=>{
     o.querySelector('#att').onclick=()=>{setTimeout(()=>{o.remove();catalog();},300)};}
   else if(MODE==="direct"){form();} else if(MODE==="dead"){} else if(MODE==="weird"){overlay("<p>Что-то новое</p><button>Непонятная кнопка</button>");} else {catalog();}
 },400)};
+// Правая колонка СЛЕДУЮЩЕГО урока (добавлено 04.10.2026, см. AUTOPILOT.md,
+// раздел 3 — фикс дублей «Не задано.»). nextcol=assigned — колонка сразу
+// показывает «дом. задание / Задано / Проверить к: <дата позже урока>»;
+// nextcol=empty — колонка загрузилась, но без «Задано» (реальный текст
+// такого состояния не видели ни разу на живом МЭШ — это условный
+// плейсхолдер только чтобы проверить, что наш код решает «не выдано», а не
+// гадает); nextcol=slow — то же, что assigned, но с задержкой 2с (проверить,
+// что код действительно ждёт, а не падает раньше времени); без nextcol —
+// колонка не появляется вообще (проверка таймаута — конец четверти или
+// медленная загрузка).
+const NEXTCOL = Q.get("nextcol");
+function renderNextCol(mode){
+  const el = document.getElementById("nextLessonCol");
+  if (mode === "assigned") el.textContent = "12.10 ПН 09:30-10:15 тема дид. единиц 3 материалов 2 дом. задание Задано Домашнее задание Не задано. Задано: 04.10.2026 в 22:37 Проверить к: 05.10.2026";
+  else if (mode === "empty") el.textContent = "12.10 ПН 09:30-10:15 тема дид. единиц 3 материалов 0 дом. задание Домашнее задание";
+}
+if (NEXTCOL === "slow") setTimeout(() => renderNextCol("assigned"), 2000);
+else if (NEXTCOL) renderNextCol(NEXTCOL);
 </script></body></html>

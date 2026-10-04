@@ -172,17 +172,18 @@
     padding-top: 10px;
     border-top: 1px dashed #ddd;
   }
-  #apOpenMaterialBtn, #apCloseMaterialBtn {
+  #apOpenMaterialBtn, #apCloseMaterialBtn, #apLaunchScenarioBtn, #apCloseScenarioBtn {
     background: #eee;
     color: #333;
     width: 100%;
     margin-top: 6px;
   }
-  #apOpenMaterialBtn:disabled, #apCloseMaterialBtn:disabled {
+  #apOpenMaterialBtn:disabled, #apCloseMaterialBtn:disabled,
+  #apLaunchScenarioBtn:disabled, #apCloseScenarioBtn:disabled {
     color: #aaa;
     cursor: default;
   }
-  #apMaterialStatus {
+  #apMaterialStatus, #apScenarioStatus {
     font-size: 12px;
     color: #666;
     margin-top: 6px;
@@ -192,7 +193,7 @@
 </head>
 <body>
   <h1>МЭШ — автозадание ДЗ</h1>
-  <div id="buildInfo" style="font-size:11px;color:#999;margin:-6px 0 10px;">сборка: 01.10.2026-d (диагностика кнопки материала)</div>
+  <div id="buildInfo" style="font-size:11px;color:#999;margin:-6px 0 10px;">сборка: 04.10.2026-a (фикс дублей ДЗ + запуск сценария)</div>
   <label class="toggle-row">
     <input type="checkbox" id="enabledToggle" checked />
     <span>Расширение включено</span>
@@ -235,6 +236,19 @@
     <button id="apOpenMaterialBtn">Открыть материал (1-й отмеченный урок)</button>
     <button id="apCloseMaterialBtn">Закрыть вкладку с материалом</button>
     <div id="apMaterialStatus"></div>
+
+    <div class="ap-subtitle">Тест: сценарий урока («начать урок»)</div>
+    <div class="ap-note">
+      Работает на первом отмеченном галочкой уроке выше. «Запустить» —
+      находит сценарий в «Материалах к уроку», нажимает «...» → «Запустить»
+      и открывает вкладку с ним в фоне, не мешая экрану (если у урока
+      несколько сценариев — берёт первый; если сценария нет — честно
+      напишет и ничего не нажмёт). «Закрыть» закроет её, только если адрес
+      всё ещё похож на страницу сценария.
+    </div>
+    <button id="apLaunchScenarioBtn">Запустить сценарий (1-й отмеченный урок)</button>
+    <button id="apCloseScenarioBtn">Закрыть вкладку сценария</button>
+    <div id="apScenarioStatus"></div>
   </div>
 
   <script src="popup.js"></script>

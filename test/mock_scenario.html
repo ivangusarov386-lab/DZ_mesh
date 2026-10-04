@@ -1,0 +1,43 @@
+<!doctype html><html><body style="margin:0;font-family:sans-serif">
+<h6>Материалы к уроку</h6>
+<div id="materials" style="width:450px"></div>
+<script>
+// count=0|1|2 — сколько карточек-сценариев на уроке (по умолчанию 2).
+// «...» помечена data-test-component="materialCardMenuList-<uuid>", «×» —
+// "materialCardDeleteUp-<uuid>" — те же атрибуты, что подтверждены через
+// DevTools на живом МЭШ и для видео, и для сценария (см. CLAUDE.md/AUTOPILOT.md).
+const Q = new URLSearchParams(location.search);
+const COUNT = Q.has("count") ? +Q.get("count") : 2;
+const TITLES = ["Волейбол. Тактические действия игроков", "Волейбол. Прием и передача мяча снизу"];
+const materials = document.getElementById("materials");
+for (let i = 0; i < COUNT; i++) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.style.cssText = "display:flex;height:72px;align-items:center;border:1px solid #ccc";
+  card.innerHTML =
+    '<svg width="24" height="24"></svg><div style="flex:1"><div>' + TITLES[i] + '</div><div>Сценарий урока</div></div>' +
+    '<button data-test-component="materialCardMenuList-uuid' + i + '"><svg width="20" height="20"></svg></button>' +
+    '<button data-test-component="materialCardDeleteUp-uuid' + i + '"><svg width="20" height="20"></svg></button>';
+  materials.appendChild(card);
+}
+materials.querySelectorAll('[data-test-component^="materialCardDeleteUp-"]').forEach((b) => {
+  b.onclick = () => { window.__removed = (window.__removed || 0) + 1; };
+});
+materials.querySelectorAll('[data-test-component^="materialCardMenuList-"]').forEach((b, i) => {
+  b.onclick = () => {
+    document.querySelectorAll('[role=tooltip]').forEach((t) => t.remove());
+    const r = b.getBoundingClientRect();
+    const t = document.createElement("div");
+    t.setAttribute("role", "tooltip");
+    t.style.cssText = "position:fixed;background:#fff;border:1px solid #999;padding:8px;left:" + (r.left - 150) + "px;top:" + (r.bottom + 4) + "px";
+    t.innerHTML =
+      '<div><div>Действия с материалом</div>' +
+      '<a target="_blank" href="https://uchebnik.example/view/' + i + '" style="display:block"><i></i><span>Просмотреть</span></a>' +
+      '<a target="_blank" href="https://uchebnik.example/composer3/lesson/' + i + '/management?activity_url=x" style="display:block"><i></i><span>Запустить</span></a>' +
+      '<button onclick="window.__deleted=(window.__deleted||0)+1"><i></i><span>Удалить</span></button></div>';
+    document.body.appendChild(t);
+  };
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll('[role=tooltip]').forEach((t) => t.remove()); });
+</script>
+</body></html>
