@@ -554,11 +554,11 @@ apLaunchScenarioBtn.addEventListener("click", async () => {
   if (!resp || !resp.ok) {
     apScenarioStatusEl.textContent =
       resp && resp.reason === "no-scenario"
-        ? `У урока «${lesson.group_name}» нет сценария в «Материалах к уроку» — запускать нечего.`
+        ? `У урока «${lesson.group_name}» нет материала в «Материалах к уроку» — запускать нечего.`
         : "Не удалось: " + (resp ? resp.reason : "нет ответа от фона");
     return;
   }
-  apScenarioStatusEl.textContent = `✓ Сценарий «${resp.title}» запущен в новой вкладке (в фоне).`;
+  apScenarioStatusEl.textContent = `✓ Урок запущен в новой вкладке (в фоне) — через «${resp.action}».`;
 });
 
 apCloseScenarioBtn.addEventListener("click", async () => {

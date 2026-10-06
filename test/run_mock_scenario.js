@@ -1,18 +1,21 @@
-// Прогон content.js на макете «Материалы к уроку» с карточками сценариев.
-// Проверяет getScenarioLaunchLink(): находит карточку с подписью «Сценарий
-// урока», открывает её «...» (data-test-component="materialCardMenuList-<uuid>",
-// подтверждено через DevTools на живом МЭШ и для видео, и для сценария — см.
-// CLAUDE.md/AUTOPILOT.md), находит в меню пункт «Запустить» (НЕ «Просмотреть»)
-// и возвращает его ссылку, ничего не нажимая. Ноль сценариев или индекс за
+// Прогон content.js на макете «Материалы к уроку» с карточками материалов.
+// Проверяет getScenarioLaunchLink(): находит ЛЮБУЮ карточку материала (не
+// только «Сценарий урока» — обобщено 06.10.2026 по просьбе Ивана «запускать
+// любой урок»), открывает её «...» (data-test-component=
+// "materialCardMenuList-<uuid>", подтверждено через DevTools на живом МЭШ и
+// для видео, и для сценария — см. CLAUDE.md/AUTOPILOT.md), и в открывшемся
+// меню берёт «Запустить», если он есть (сценарий), иначе «Просмотреть»
+// (видео и другие материалы без «Запустить»). Ноль материалов или индекс за
 // пределами списка — отказ без единого клика; «×» и «Удалить» не нажимаются
 // ни в одном сценарии.
 // Запуск: положить рядом new_content.js (копия content.js), `node run_mock_scenario.js`.
 const { chromium } = require('playwright');
 
 const CASES = [
-  ['первый сценарий', 'count=2', 0, { ok: true, titleIncludes: 'Тактические действия', hrefIncludes: '/composer3/lesson/0/management' }],
-  ['второй сценарий', 'count=2', 1, { ok: true, titleIncludes: 'Прием и передача', hrefIncludes: '/composer3/lesson/1/management' }],
-  ['сценариев нет', 'count=0', 0, { ok: false, reason: 'no-scenario' }],
+  ['сценарий, 1-й материал → «Запустить»', 'count=2', 0, { ok: true, action: 'Запустить', hrefIncludes: '/composer3/lesson/0/management' }],
+  ['сценарий, 2-й материал → «Запустить»', 'count=2', 1, { ok: true, action: 'Запустить', hrefIncludes: '/composer3/lesson/1/management' }],
+  ['видеоурок (нет «Запустить») → берёт «Просмотреть»', 'count=1&kind=video', 0, { ok: true, action: 'Просмотреть', hrefIncludes: '/material_view/atomic_objects/0' }],
+  ['материалов нет', 'count=0', 0, { ok: false, reason: 'no-scenario' }],
   ['такого номера нет', 'count=2', 5, { ok: false, reason: 'no-scenario' }],
 ];
 
@@ -43,7 +46,7 @@ const CASES = [
     const ok =
       resp && resp.ok === expected.ok &&
       (expected.reason === undefined || resp.reason === expected.reason) &&
-      (expected.titleIncludes === undefined || (resp.title || '').includes(expected.titleIncludes)) &&
+      (expected.action === undefined || resp.action === expected.action) &&
       (expected.hrefIncludes === undefined || (resp.href || '').includes(expected.hrefIncludes)) &&
       side.removed === 0 && side.deleted === 0;
 

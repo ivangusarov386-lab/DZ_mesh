@@ -195,34 +195,28 @@ async function openLessonMaterial() {
 }
 
 // ---------------------------------------------------------------------------
-// Запуск сценария урока (автопилот, этап «начать урок» — найдено и
-// проверено руками на живом МЭШ 04.10.2026, см. AUTOPILOT.md в корне
-// репозитория). «Начать урок» в МЭШ — это запустить сценарий урока из
-// того же блока «Материалы к уроку», что и обычные материалы выше: та же
-// кнопка «...» (тот же атрибут materialCardMenuList-<uuid>, подтверждено
-// дважды через DevTools — для видео и для сценария), но в открывшемся меню
-// нужен пункт «Запустить» (обычная ссылка target="_blank"), а не
-// «Просмотреть». Открывается НОВАЯ вкладка на uchebnik.mos.ru. По просьбе
-// Ивана (сценарий может идти на проекторе) эту вкладку должен открывать
-// background.js через chrome.tabs.create с active:false — поэтому здесь
-// мы только ВОЗВРАЩАЕМ ссылку «Запустить», не кликая по ней напрямую.
+// Запуск урока (автопилот, этап «начать урок» — найдено и проверено руками
+// на живом МЭШ 04.10.2026, см. AUTOPILOT.md в корне репозитория). «Начать
+// урок» в МЭШ — это запустить материал урока из блока «Материалы к уроку»:
+// та же кнопка «...», что и у findMaterialMenuButtons() выше (тот же
+// атрибут materialCardMenuList-<uuid>). В открывшемся меню «Действия с
+// материалом» состав пунктов зависит от ТИПА материала — у «Сценария урока»
+// их три («Просмотреть»/«Запустить»/«Удалить»), у «Видеоурока» только два
+// («Просмотреть»/«Удалить», без «Запустить» — подтверждено 30.09.2026).
+// Иван попросил 06.10.2026 «запускать любой урок» — то есть не только
+// сценарии: эта функция поэтому работает на ЛЮБОЙ карточке материала, а не
+// только с подписью «Сценарий урока», и берёт «Запустить», если он есть в
+// меню, иначе «Просмотреть» (для материалов без «Запустить» это и есть их
+// способ «начать» — то же действие, что уже делает отдельная кнопка
+// «Открыть материал» выше, просто здесь это побочный случай одной общей
+// функции, а не отдельная ветка). Открывается НОВАЯ вкладка на
+// uchebnik.mos.ru. По просьбе Ивана (урок может идти на проекторе) эту
+// вкладку должен открывать background.js через chrome.tabs.create с
+// active:false — поэтому здесь мы только ВОЗВРАЩАЕМ найденную ссылку, не
+// кликая по ней напрямую.
 // ---------------------------------------------------------------------------
 
-const SCENARIO_LABEL = "Сценарий урока";
-const LAUNCH_ITEM = "Запустить";
-
-// Карточки материалов с подписью «Сценарий урока» — самый глубокий такой
-// блок (чтобы не задвоить внешний контейнер и вложенную карточку), с хотя бы
-// одной кнопкой внутри. Бывают и другие типы материалов (например,
-// «Видеоурок») — их эта функция не находит и не трогает.
-function findScenarioCards() {
-  const all = Array.from(document.querySelectorAll("div")).filter(
-    (e) => isVisible(e) && norm(e.textContent).endsWith(SCENARIO_LABEL) && e.querySelectorAll("button").length >= 1
-  );
-  return all.filter((e) => !all.some((o) => o !== e && e.contains(o)));
-}
-
-// index — какой по счёту сценарий запускать (0 = первый). Если сценариев
+// index — какой по счёту материал запускать (0 = первый). Если материалов
 // несколько — какой из них правильно запускать, ещё не решено (открытый
 // вопрос к Ивану, см. AUTOPILOT.md), пока всегда берём первый по умолчанию.
 async function getScenarioLaunchLink(index = 0) {
@@ -230,41 +224,43 @@ async function getScenarioLaunchLink(index = 0) {
   if (!ready) return fail("timeout", "блок «Материалы к уроку» не загрузился");
   await sleep(1500); // даём списку материалов дорисоваться
 
-  const cards = findScenarioCards();
-  if (cards.length === 0) return fail("no-scenario", "у урока нет сценария в «Материалах к уроку»");
-  if (index >= cards.length) return fail("no-scenario", `сценария №${index + 1} нет (всего ${cards.length})`);
+  // Те же кнопки «...», что и у findMaterialMenuButtons() — по ВСЕЙ
+  // странице, без фильтра по типу/подписи материала.
+  const buttons = findMaterialMenuButtons();
+  if (buttons.length === 0) return fail("no-scenario", "у урока нет материала в «Материалах к уроку»");
+  if (index >= buttons.length) return fail("no-scenario", `материала №${index + 1} нет (всего ${buttons.length})`);
 
-  const card = cards[index];
-  const title = norm(card.textContent).slice(0, -SCENARIO_LABEL.length).trim();
-  // Та же кнопка «...», что и у findMaterialMenuButtons() выше — найденная
-  // ВНУТРИ конкретной карточки сценария, чтобы открыть меню именно его, а не
-  // первого материала на странице.
-  const menuBtn = card.querySelector('[data-test-component^="materialCardMenuList-"]');
-  if (!menuBtn || !isVisible(menuBtn) || isDisabled(menuBtn) || !isOnTop(menuBtn)) {
-    return fail("no-menu-button", "не нашёл кнопку «...» у сценария");
+  const menuBtn = buttons[index];
+  if (!isVisible(menuBtn) || isDisabled(menuBtn) || !isOnTop(menuBtn)) {
+    return fail("no-menu-button", "кнопка «...» у материала сейчас не нажимается");
   }
 
   await think();
-  step(`открываю меню «...» у сценария «${title}»`);
+  step(`открываю меню «...» у материала №${index + 1}`);
   await humanClick(menuBtn);
 
   const menu = await waitForEl(findMaterialActionsMenu, 5000);
   if (!menu) return fail("no-menu", "меню «Действия с материалом» не открылось");
 
-  // Только ссылка с ТОЧНЫМ текстом «Запустить» — рядом в том же меню есть
-  // «Удалить» (убирает материал из урока), её не трогаем вообще.
-  const link = Array.from(menu.querySelectorAll("a")).find((a) => norm(a.textContent) === LAUNCH_ITEM);
+  // «Запустить» — для сценариев; если его нет (видео и другие пассивные
+  // материалы), берём «Просмотреть». «Удалить» в том же меню не трогаем
+  // никогда ни в одном из вариантов.
+  const links = Array.from(menu.querySelectorAll("a"));
+  const launchLink = links.find((a) => norm(a.textContent) === "Запустить");
+  const viewLink = links.find((a) => norm(a.textContent) === "Просмотреть");
+  const link = launchLink || viewLink;
   if (!link || !link.href) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    return fail("no-launch-item", "в меню нет пункта «Запустить»");
+    return fail("no-launch-item", "в меню нет ни «Запустить», ни «Просмотреть»");
   }
 
   const href = link.href;
-  step("нашёл «Запустить», передаю ссылку для открытия вкладки");
+  const action = launchLink ? "Запустить" : "Просмотреть";
+  step(`нашёл «${action}», передаю ссылку для открытия вкладки`);
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
   hideCursorLater();
-  return { ok: true, href, title, total: cards.length };
+  return { ok: true, href, action, total: buttons.length };
 }
 
 function findMaterialActionsMenu() {

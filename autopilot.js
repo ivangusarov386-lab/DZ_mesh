@@ -316,13 +316,15 @@ function closeAllMaterialTabs() {
   }));
 }
 
-// --- Сценарий урока («начать урок») — найдено и проверено руками на живом
+// --- Запуск урока («начать урок») — найдено и проверено руками на живом
 // МЭШ 04.10.2026 вместе с Иваном через Claude in Chrome, см. AUTOPILOT.md в
-// корне репозитория. Пока вызывается вручную из попапа для теста (как и
-// материал выше) — будильники «открыть сценарий ровно в начале урока,
-// закрыть ровно в конце» ещё не запланированы, это следующий шаг (см.
-// AUTOPILOT.md, раздел 6, пункт 4), после того как ручной тест подтвердит
-// шаги B и C на живом МЭШ по одному.
+// корне репозитория; обобщено с «сценария» на любой материал 06.10.2026
+// (Иван: «запускать любой урок») — см. комментарий у getScenarioLaunchLink()
+// в content.js. Пока вызывается вручную из попапа для теста (как и материал
+// выше) — будильники «открыть урок ровно в начале урока, закрыть ровно в
+// конце» ещё не запланированы, это следующий шаг (см. AUTOPILOT.md, раздел
+// 6, пункт 4), после того как ручной тест подтвердит шаги B и C на живом
+// МЭШ по одному.
 
 const scenarioTabs = {}; // lessonId -> id вкладки с запущенным сценарием
 
@@ -359,17 +361,22 @@ function launchScenarioForLesson(meshTabId, lessonId, index = 0) {
         chrome.tabs.create({ url: resp.href, active: false }, (tab) => {
           scenarioTabs[lessonId] = tab.id;
           saveScenarioTabs();
-          resolve({ ok: true, title: resp.title, tabId: tab.id });
+          resolve({ ok: true, action: resp.action, tabId: tab.id });
         });
       });
     })
     .catch(() => ({ ok: false, reason: "message-failed" }));
 }
 
-// Закрытие — только если вкладка всё ещё похожа на сценарий (адрес
-// начинается с uchebnik.mos.ru/composer3/lesson/), как явно просил
-// AUTOPILOT.md («не закрыть чужую вкладку», если пользователь, например,
-// сам перешёл в этой вкладке куда-то ещё).
+// Закрытие — только если вкладка всё ещё похожа на вкладку урока, как явно
+// просил AUTOPILOT.md («не закрыть чужую вкладку», если пользователь,
+// например, сам перешёл в этой вкладке куда-то ещё). Проверяем сам домен
+// uchebnik.mos.ru целиком, а не один конкретный путь — после обобщения
+// 06.10.2026 («запускать любой урок») здесь бывает любой из двух
+// подтверждённых адресов: .../composer3/lesson/<id>/management (сценарий,
+// «Запустить») или .../material_view/atomic_objects/<id> (видео и другие
+// материалы, «Просмотреть») — закрытие не должно отказывать только потому,
+// что открылся второй, а не первый вариант.
 function closeScenarioForLesson(lessonId) {
   return new Promise((resolve) => {
     const tabId = scenarioTabs[lessonId];
@@ -379,7 +386,7 @@ function closeScenarioForLesson(lessonId) {
     }
     chrome.tabs.get(tabId, (tab) => {
       void chrome.runtime.lastError; // вкладку могли уже закрыть вручную — не ошибка
-      const looksLikeScenario = tab && (tab.url || "").startsWith("https://uchebnik.mos.ru/composer3/lesson/");
+      const looksLikeScenario = tab && (tab.url || "").startsWith("https://uchebnik.mos.ru/");
       delete scenarioTabs[lessonId];
       saveScenarioTabs();
       if (!tab) {

@@ -2,20 +2,26 @@
 <h6>Материалы к уроку</h6>
 <div id="materials" style="width:450px"></div>
 <script>
-// count=0|1|2 — сколько карточек-сценариев на уроке (по умолчанию 2).
-// «...» помечена data-test-component="materialCardMenuList-<uuid>", «×» —
+// count=0|1|2 — сколько карточек материала на уроке (по умолчанию 2).
+// kind=scenario|video (по умолчанию scenario) — scenario даёт в меню
+// «Просмотреть»+«Запустить»+«Удалить» (как у «Сценария урока»), video —
+// только «Просмотреть»+«Удалить», без «Запустить» (как у «Видеоурока»,
+// подтверждено 30.09.2026 — см. CLAUDE.md). «...» помечена
+// data-test-component="materialCardMenuList-<uuid>", «×» —
 // "materialCardDeleteUp-<uuid>" — те же атрибуты, что подтверждены через
 // DevTools на живом МЭШ и для видео, и для сценария (см. CLAUDE.md/AUTOPILOT.md).
 const Q = new URLSearchParams(location.search);
 const COUNT = Q.has("count") ? +Q.get("count") : 2;
+const KIND = Q.get("kind") || "scenario";
 const TITLES = ["Волейбол. Тактические действия игроков", "Волейбол. Прием и передача мяча снизу"];
+const LABEL = KIND === "video" ? "Видеоурок" : "Сценарий урока";
 const materials = document.getElementById("materials");
 for (let i = 0; i < COUNT; i++) {
   const card = document.createElement("div");
   card.className = "card";
   card.style.cssText = "display:flex;height:72px;align-items:center;border:1px solid #ccc";
   card.innerHTML =
-    '<svg width="24" height="24"></svg><div style="flex:1"><div>' + TITLES[i] + '</div><div>Сценарий урока</div></div>' +
+    '<svg width="24" height="24"></svg><div style="flex:1"><div>' + TITLES[i] + '</div><div>' + LABEL + '</div></div>' +
     '<button data-test-component="materialCardMenuList-uuid' + i + '"><svg width="20" height="20"></svg></button>' +
     '<button data-test-component="materialCardDeleteUp-uuid' + i + '"><svg width="20" height="20"></svg></button>';
   materials.appendChild(card);
@@ -30,10 +36,12 @@ materials.querySelectorAll('[data-test-component^="materialCardMenuList-"]').for
     const t = document.createElement("div");
     t.setAttribute("role", "tooltip");
     t.style.cssText = "position:fixed;background:#fff;border:1px solid #999;padding:8px;left:" + (r.left - 150) + "px;top:" + (r.bottom + 4) + "px";
+    const launchLink = KIND === "video" ? "" :
+      '<a target="_blank" href="https://uchebnik.example/composer3/lesson/' + i + '/management?activity_url=x" style="display:block"><i></i><span>Запустить</span></a>';
     t.innerHTML =
       '<div><div>Действия с материалом</div>' +
-      '<a target="_blank" href="https://uchebnik.example/view/' + i + '" style="display:block"><i></i><span>Просмотреть</span></a>' +
-      '<a target="_blank" href="https://uchebnik.example/composer3/lesson/' + i + '/management?activity_url=x" style="display:block"><i></i><span>Запустить</span></a>' +
+      '<a target="_blank" href="https://uchebnik.example/material_view/atomic_objects/' + i + '" style="display:block"><i></i><span>Просмотреть</span></a>' +
+      launchLink +
       '<button onclick="window.__deleted=(window.__deleted||0)+1"><i></i><span>Удалить</span></button></div>';
     document.body.appendChild(t);
   };
